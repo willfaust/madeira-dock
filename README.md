@@ -174,6 +174,12 @@ client service through the service manager, so that nothing outlives the session
 (runtime setups from the game's Steam install script). It loads no Steam client: it only makes
 Wine's service manager reachable, prints one line and exits.
 
+Some games' own launchers install and start a Windows service of their own, which fails with RPC
+error 1722 when no service manager runs. With `MADEIRA_DOCK_GAME_SCM=1` the game session makes
+the manager reachable the same way, before the launch request: on a worker thread, waited for at
+most 20 seconds, reported as `game-scm` (or `game-scm-timeout`). A manager it starts is left
+running and ends with the session. `MADEIRA_DOCK_INSTALL_SCM=0` turns this off as well.
+
 ## Limits
 
 - **Windows program, 64-bit session.** The 32-bit build supports only the bootstrap test.
@@ -209,6 +215,7 @@ is opt-in: with no variables set, `dockhost.exe` does nothing and exits with 2.
 | `MADEIRA_STEAM_HOST_LOG` | Report file. |
 | `MADEIRA_STEAM_HOST_CEG=1` | The game ships CEG executables: prepare them first. |
 | `MADEIRA_DOCK_OFFLINE=1` | The launcher found no network: ask Valve's client for an offline logon straight away (`docs/OFFLINE.md`). |
+| `MADEIRA_DOCK_GAME_SCM=1` | Make Wine's service manager reachable before the launch request, as `--start-services` does (see "Services"). |
 
 Switches that turn a behaviour off (all default on): `MADEIRA_DOCK_CEG=0`,
 `MADEIRA_DOCK_CEG_SCM=0`, `MADEIRA_DOCK_CEG_SERVICE_INSTALL=0`, `MADEIRA_DOCK_CONTENT_WAIT=0`,

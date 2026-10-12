@@ -1,5 +1,31 @@
 # Madeira Dock — implementation handoff, ml2000 (2026-09-25)
 
+## A service manager for the game session (2026-10-12)
+
+Device logs from Madeira's madeira-bcd fork (build 359, 2026-10-03): a game
+whose own launcher installs and starts a Windows service ran its service's
+`install` and then `start` three times, and every start failed. No service
+manager runs in a game session (Valve's client service log: `BOpenSCMgr
+failed`, GLE 1722); Dock starts `services.exe` only for the one-time-install
+batch (`--start-services`) and for CEG.
+
+`MADEIRA_DOCK_GAME_SCM=1` makes `sh_launch()` call `sh_install_scm_start()`,
+the `--start-services` start, after the install folder check and before CEG
+preparation, the `ActiveProcess` values and `LaunchApp`. It runs on a worker
+thread that is waited for at most `SH_GAME_SCM_STEP_MS` (20 s), like the
+batch's bound. The report gets `game-scm=<2 started|1 already|0 off|-1
+failed>`, or `game-scm-timeout=1`. A manager it starts is left running and
+ends with the session; `MADEIRA_DOCK_INSTALL_SCM=0` makes it report 0. Off by
+default. Madeira's report allow-list needs the two new fields (companion
+change in Madeira).
+
+Device result (madeira-bcd build 360, iPhone 17 Pro Max): `game-scm=2`,
+`services.exe` started in the game session and the launcher's service was
+started by it as a service. Madeira's settings for two Steam titles (App IDs
+3240220 and 1174180) have used it since; the fork has built the host with
+this change from build 360 on, and every session of both titles logged on
+builds 514-515 (2026-10-12) reports `game-scm=2`.
+
 ## Original launch entry keys (2026-10-05)
 
 LaunchApp uses the validated `MADEIRA_STEAM_HOST_LAUNCH_OPTION` for its initial

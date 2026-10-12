@@ -166,6 +166,16 @@ static int prepare_custom_binaries(HMODULE module, void *client_user,
     return 49;
 }
 
+/* madeira-bcd: see tools/patch-dock-game-scm.py. */
+#define SH_GAME_SCM_STEP_MS 20000
+static volatile int32_t game_scm_outcome;
+
+static DWORD WINAPI game_scm_worker(void *observer)
+{
+    game_scm_outcome = sh_install_scm_start((const struct sh_observer *)observer);
+    return 0;
+}
+
 int sh_launch(HMODULE module, void *engine, void *client_user,
               const struct sh_api *api, const struct sh_observer *o,
               int32_t pipe, int32_t user, uint64_t steamid, uint32_t appid,
@@ -201,6 +211,16 @@ int sh_launch(HMODULE module, void *engine, void *client_user,
         return 41;
     }
     o->event("launch-install-directory-verified", 1);
+    /* madeira-bcd: MADEIRA_DOCK_GAME_SCM=1, see tools/patch-dock-game-scm.py. */
+    if (wide_flag(L"MADEIRA_DOCK_GAME_SCM", L'1')) {
+        HANDLE worker = CreateThread(NULL, 0, game_scm_worker, (void *)o, 0, NULL);
+        if (!worker) o->event("game-scm", sh_install_scm_start(o));
+        else {
+            if (WaitForSingleObject(worker, SH_GAME_SCM_STEP_MS) == WAIT_OBJECT_0) o->event("game-scm", game_scm_outcome);
+            else o->event("game-scm-timeout", 1);
+            CloseHandle(worker);
+        }
+    }
     HKEY active = NULL, machine = NULL;
     int result = 42;
     struct saved_value values[3] = {0};
