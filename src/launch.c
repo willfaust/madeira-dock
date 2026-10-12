@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <wchar.h>
+#include <tlhelp32.h>
 
 /* ml1970: an interrupted or stalled client update eventually fails closed. */
 #define SH_CONTENT_WAIT_MS (6ULL * 60 * 60 * 1000)
@@ -174,6 +175,31 @@ static DWORD WINAPI game_scm_worker(void *observer)
 {
     game_scm_outcome = sh_install_scm_start((const struct sh_observer *)observer);
     return 0;
+}
+
+/* madeira-bcd: MADEIRA_DOCK_KEEP_ALIVE, see tools/patch-dock-keep-alive.py. */
+static bool keep_alive_running(void)
+{
+    static wchar_t list[1024];
+    DWORD n = GetEnvironmentVariableW(L"MADEIRA_DOCK_KEEP_ALIVE", list, 1024);
+    if (!n || n >= 1024) return false;
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snap == INVALID_HANDLE_VALUE) return false;
+    PROCESSENTRY32W entry;
+    memset(&entry, 0, sizeof(entry));
+    entry.dwSize = sizeof(entry);
+    bool found = false;
+    for (BOOL ok = Process32FirstW(snap, &entry); ok && !found; ok = Process32NextW(snap, &entry)) {
+        const wchar_t *p = list;
+        while (*p && !found) {
+            const wchar_t *end = wcschr(p, L';');
+            size_t len = end ? (size_t)(end - p) : wcslen(p);
+            if (len && wcslen(entry.szExeFile) == len && !_wcsnicmp(entry.szExeFile, p, len)) found = true;
+            p += len + (end ? 1 : 0);
+        }
+    }
+    CloseHandle(snap);
+    return found;
 }
 
 int sh_launch(HMODULE module, void *engine, void *client_user,
@@ -380,6 +406,13 @@ int sh_launch(HMODULE module, void *engine, void *client_user,
         if (running) stopped_at = 0;
         else if (seen_running) {
             if (!stopped_at) stopped_at = o->now_ms();
+            if (o->now_ms() - stopped_at >= 3000 && keep_alive_running()) {
+                /* madeira-bcd: MADEIRA_DOCK_KEEP_ALIVE -- a named helper (a
+                 * self-updating launcher) still runs: hold the session. */
+                static bool kept;
+                if (!kept) { kept = true; o->event("launch-keep-alive", 1); }
+                stopped_at = o->now_ms();
+            }
             if (o->now_ms() - stopped_at >= 3000) {
                 o->event("launch-game-ended", 1);
                 result = result_received && !result_rejected ? 0 : 46;

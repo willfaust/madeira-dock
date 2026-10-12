@@ -1,5 +1,29 @@
 # Madeira Dock — implementation handoff, ml2000 (2026-09-25)
 
+## Holding the session for a restarting launcher (2026-10-12)
+
+Dock ends a game session 3 s after Valve's client stops reporting the app as
+running. Some games start through a small program that only waits for the
+publisher's launcher. When that launcher restarted itself after a
+self-update, the program exited with code 0, Valve's client reported the
+game ended and Dock shut the client down while the new launcher was still
+starting; the game itself needs the client later (madeira-bcd build 369,
+log 2026-10-03 23:21).
+
+`MADEIRA_DOCK_KEEP_ALIVE=<exe>;<exe>;...` postpones that end while any process
+with one of those image names exists (`CreateToolhelp32Snapshot`, compared
+without case), checked once per 3 s window; the session ends as before 3 s
+after the last one is gone. The report gets `launch-keep-alive=1` the first
+time it holds the session. A list of 1024 characters or more is ignored. Off
+by default. Madeira's report allow-list needs the new field (companion change
+in Madeira).
+
+Madeira's settings for App IDs 3240220 and 1174180 have set it since
+madeira-bcd build 370 (iPhone 17 Pro Max), and the fork's CI has built the
+host with it since. No logged session has needed it yet: none of the
+sessions of both titles on builds 514-515 (2026-10-12) reports
+`launch-keep-alive`.
+
 ## A service manager for the game session (2026-10-12)
 
 Device logs from Madeira's madeira-bcd fork (build 359, 2026-10-03): a game

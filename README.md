@@ -72,8 +72,9 @@ nothing else.
     `steam_api64.dll` talks to a live, signed-in client exactly as it would on a PC. The game,
     its Steamworks calls and its DRM (SteamStub wrapper, CEG, the game's own checks) run
     unmodified.
-13. **Shuts the client down** when the game has ended, with the public `SteamClient021` shutdown
-    call, releases the user and pipe, and exits with a numeric result.
+13. **Shuts the client down** when the game has ended (with `MADEIRA_DOCK_KEEP_ALIVE`, once none
+    of the processes it names runs either), with the public `SteamClient021` shutdown call,
+    releases the user and pipe, and exits with a numeric result.
 
 ## What it does not do
 
@@ -216,6 +217,7 @@ is opt-in: with no variables set, `dockhost.exe` does nothing and exits with 2.
 | `MADEIRA_STEAM_HOST_CEG=1` | The game ships CEG executables: prepare them first. |
 | `MADEIRA_DOCK_OFFLINE=1` | The launcher found no network: ask Valve's client for an offline logon straight away (`docs/OFFLINE.md`). |
 | `MADEIRA_DOCK_GAME_SCM=1` | Make Wine's service manager reachable before the launch request, as `--start-services` does (see "Services"). |
+| `MADEIRA_DOCK_KEEP_ALIVE` | Image names separated by `;`. After Valve's client reports the game ended, the session is held while a process with one of these names runs (a launcher restarting itself after an update), checked every 3 seconds; reported once as `launch-keep-alive`. |
 
 Switches that turn a behaviour off (all default on): `MADEIRA_DOCK_CEG=0`,
 `MADEIRA_DOCK_CEG_SCM=0`, `MADEIRA_DOCK_CEG_SERVICE_INSTALL=0`, `MADEIRA_DOCK_CONTENT_WAIT=0`,
