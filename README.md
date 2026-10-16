@@ -189,6 +189,17 @@ Wine's service manager reachable, prints one line and exits.
   under Dock; nothing is patched to hide that.
 - **A client update needs a new verified layout.** Until then Dock refuses the new build.
 
+## Extra launch arguments
+
+`MADEIRA_STEAM_HOST_ARGUMENTS` adds bounded UTF-8 arguments to Valve's own
+`LaunchApp` user-arguments parameter. It is supplied on the first request and
+on retries alongside the selected original Steam launch entry key. It never
+enters the installer command and only its byte count is logged. Unbalanced
+quotes, control characters, more than 64 tokens or 4095 bytes fail closed;
+missing input preserves Valve's normal arguments. The app exports the value
+from the selected library profile before starting this host. The client still
+checks authentication, subscription and the original game DRM.
+
 ## Running it
 
 Dock is started by Madeira, not by hand. Everything is passed in the environment, and every stage
