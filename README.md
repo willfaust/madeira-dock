@@ -187,9 +187,10 @@ Wine's service manager reachable, prints one line and exits.
 A game session gets the same bounded start before the launch when the game needs it
 (`src/launch.c`, `src/scm.c`): some launchers install an automatic-start Windows service of their
 own, and without a service manager every start of it fails (RPC error 1722). With
-`MADEIRA_DOCK_GAME_SCM` unset, Dock counts, read-only, the automatic Win32 services registered in
-the prefix whose image lies outside the Windows folder (`game-scm-services`; Wine's own services
-never count) and starts the manager only when there is at least one; `1` always starts it and `0`
+`MADEIRA_DOCK_GAME_SCM` unset, Dock counts, read-only, the Win32 services registered in the prefix
+with automatic or on-demand start whose image lies outside the Windows folder (`game-scm-services`;
+Wine's own services never count) and starts the manager only when there is at least one; `1`
+always starts it and `0`
 never does. The step waits at most 20 s (`game-scm=<2 started, 1 already running, 0 off, -1
 failed>` or `game-scm-timeout=1`) and never decides whether the game launches. The manager it
 starts stays for the session, as after `--start-services`.
@@ -252,7 +253,9 @@ three waits only ask Valve's client again for a bounded time when it answers "co
 installing", "the game's configuration has not arrived yet" or "another session is playing"; they
 never turn a refusal into a launch. `MADEIRA_DOCK_GAME_SCM` is three-way: `0` never starts a
 service manager for the game session, `1` always does, unset starts one only when the prefix
-registers an automatic service outside Windows (see "Services").
+registers a startable (automatic or on-demand) service outside Windows (see "Services"). Madeira
+also sets `1` for a game whose own Steam install script recorded a non-Microsoft program, since a
+launcher registers its service only on its first run, through the manager.
 
 The selected launch key is reused on every retry and reported as numeric
 `launch-option-index`. Invalid input reports `launch-option-invalid=1`. An error 22 whose

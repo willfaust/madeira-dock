@@ -99,8 +99,9 @@ const char *sh_install_scm_word(int32_t outcome);
 enum sh_game_scm_mode { SH_GAME_SCM_OFF = 0, SH_GAME_SCM_ON = 1, SH_GAME_SCM_AUTO = 2 };
 enum sh_game_scm_mode sh_game_scm_mode(const wchar_t *value);
 /* A service entry under System\CurrentControlSet\Services that Windows
- * would start at boot and that is not part of Windows: a Win32 service
- * (type 0x10 or 0x20) with start type 2 (automatic) whose image is neither
+ * a program may start and that is not part of Windows: a Win32 service
+ * (type 0x10 or 0x20) with start type 2 (automatic) or 3 (on demand, which
+ * the program that registered it starts itself) whose image is neither
  * under the Windows folder nor given relative to it (%SystemRoot%,
  * \SystemRoot, System32\, SysWOW64\). Wine's own services all fail this
  * test; a launcher's own service passes it.

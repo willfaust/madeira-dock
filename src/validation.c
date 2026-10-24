@@ -302,7 +302,10 @@ bool sh_image_is_windows(const wchar_t *image, const wchar_t *windows_dir)
 bool sh_service_is_foreign_autostart(uint32_t type, uint32_t start, const wchar_t *image,
                                      const wchar_t *windows_dir)
 {
-    if (!(type & 0x30u) || start != 2) return false;   /* SERVICE_WIN32_*, SERVICE_AUTO_START */
+    /* SERVICE_WIN32_*; SERVICE_AUTO_START or SERVICE_DEMAND_START: a program
+     * that registered a demand-start service starts it itself through the
+     * manager, so it needs one as much as an automatic one does. */
+    if (!(type & 0x30u) || (start != 2 && start != 3)) return false;
     if (!image) return false;
     while (*image == L'"' || *image == L' ') ++image;
     if (!*image) return false;

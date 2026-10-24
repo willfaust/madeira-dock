@@ -11,9 +11,9 @@ and `launch-keep-alive-held`, and the round `ml2020`.
 
 **Service manager** (`src/launch.c`, `src/scm.c`): after the install-folder
 check and before CEG, `MADEIRA_DOCK_GAME_SCM` is read: `0` off, `1` on, unset
-auto. Auto counts, read-only, the automatic Win32 services under
+auto. Auto counts, read-only, the automatic and on-demand Win32 services under
 `HKLM\System\CurrentControlSet\Services` whose image is not Windows' own
-(`sh_service_is_foreign_autostart`: type 0x10/0x20, start 2, image neither in
+(`sh_service_is_foreign_autostart`: type 0x10/0x20, start 2 or 3, image neither in
 the Windows folder nor `%SystemRoot%`/`\SystemRoot`/`System32\`/`SysWOW64\`
 relative), reports `game-scm-services=<n>`, and starts the manager only for
 n > 0. The start is `sh_install_scm_start` (the `--start-services` one, so

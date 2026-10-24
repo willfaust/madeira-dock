@@ -193,8 +193,10 @@ int main(void)
     /* type 0x10 own process, 0x20 shared; start 2 automatic, 3 demand, 4 disabled */
     assert(sh_service_is_foreign_autostart(0x10, 2, L"\"C:\\Program Files\\Publisher\\Service.exe\"", windows));
     assert(sh_service_is_foreign_autostart(0x20, 2, L"C:\\Games\\svc.exe --run", windows));
-    assert(!sh_service_is_foreign_autostart(0x10, 3, L"C:\\Games\\svc.exe", windows));
-    assert(!sh_service_is_foreign_autostart(0x10, 4, L"C:\\Games\\svc.exe", windows));
+    assert(sh_service_is_foreign_autostart(0x10, 3, L"C:\\Games\\svc.exe", windows));   /* demand start: the program starts it */
+    assert(!sh_service_is_foreign_autostart(0x10, 4, L"C:\\Games\\svc.exe", windows));  /* disabled */
+    assert(!sh_service_is_foreign_autostart(0x10, 0, L"C:\\Games\\svc.exe", windows) &&
+           !sh_service_is_foreign_autostart(0x10, 1, L"C:\\Games\\svc.exe", windows));  /* boot and system start: drivers */
     assert(!sh_service_is_foreign_autostart(0x1, 2, L"C:\\Games\\drv.sys", windows));
     assert(!sh_service_is_foreign_autostart(0x10, 2, L"%SystemRoot%\\system32\\svchost.exe -k x", windows));
     assert(!sh_service_is_foreign_autostart(0x10, 2, L"C:\\windows\\system32\\spoolsv.exe", windows));
