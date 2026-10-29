@@ -119,6 +119,18 @@ size_t sh_cm_invite_to_lobby(uint8_t *out, size_t cap, uint32_t appid, uint64_t 
     return at;
 }
 
+size_t sh_cm_service_call(uint8_t *out, size_t cap, const char *method)
+{
+    size_t length = method ? strnlen(method, 128) : 0;
+    if (!out || !length || length >= 128 || cap < 8 + 2 + length) return 0;
+    put32(out, SH_CM_SERVICE_METHOD | 0x80000000u);
+    out[8] = 0x62;                                      /* header 12 target_job_name */
+    out[9] = (uint8_t)length;
+    memcpy(out + 10, method, length);
+    put32(out + 4, (uint32_t)(2 + length));
+    return 10 + length;
+}
+
 size_t sh_cm_change_status(uint8_t *out, size_t cap, uint32_t state)
 {
     if (!out || cap < 8 + 1 + 5 + 6) return 0;

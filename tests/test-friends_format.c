@@ -109,5 +109,9 @@ int main(void)
     assert(size == 8 + 3 + 18 && !memcmp(msg, invite, sizeof invite) && msg[19] == 0x01 && msg[20] == 0x19 && msg[21] == 9);
     assert(!sh_cm_invite_to_lobby(msg, sizeof msg, 480, 0, ID(9)));
     assert(!sh_cm_invite_to_lobby(msg, sizeof msg, 480, 1, 0x0170000100000009ULL));
+    size = sh_cm_service_call(msg, sizeof msg, "Chat.RequestFriendPersonaStates#1");
+    static const uint8_t call[] = {0x97, 0, 0, 0x80, 35, 0, 0, 0, 0x62, 33, 'C', 'h', 'a', 't', '.'};
+    assert(size == 10 + 33 && !memcmp(msg, call, sizeof call) && msg[size - 1] == '1');
+    assert(!sh_cm_service_call(msg, 20, "Chat.RequestFriendPersonaStates#1") && !sh_cm_service_call(msg, sizeof msg, ""));
     puts("PASS: friends feed bounds, name/connect sanitizing, SteamID and command validation, Friends sign-in messages");
 }

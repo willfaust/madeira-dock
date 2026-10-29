@@ -71,6 +71,10 @@ size_t sh_cm_change_status(uint8_t *out, size_t cap, uint32_t state);
 /* CMsgClientRequestFriendData: persona_state_requested, friends (fixed64). */
 size_t sh_cm_request_friend_data(uint8_t *out, size_t cap, uint32_t flags, const uint64_t *ids, uint32_t count);
 #define SH_CM_INVITE_TO_LOBBY 6621u
+#define SH_CM_SERVICE_METHOD 151u
+/* A unified service call with an empty request, as the Friends window sends
+ * it: header target_job_name (e.g. "Chat.RequestFriendPersonaStates#1"). */
+size_t sh_cm_service_call(uint8_t *out, size_t cap, const char *method);
 /* CMsgClientMMSInviteToLobby as the friends menu's "Invite to lobby" sends
  * it: header routing_appid, body steam_id_lobby and steam_id_user_invited. */
 size_t sh_cm_invite_to_lobby(uint8_t *out, size_t cap, uint32_t appid, uint64_t lobby, uint64_t user);

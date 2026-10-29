@@ -173,18 +173,22 @@ static void write_feed(struct sh_friends *f)
             }
         }
     }
-    /* As the Friends window does: ask for every friend's persona data, at
-     * most once a minute. */
+    /* As the Friends window does: ask for persona data only for friends whose
+     * name has not loaded, at most once a minute. Asking for loaded friends
+     * resets their live status to offline; status comes from the
+     * Chat.RequestFriendPersonaStates subscription (sh_friends_poll). */
     uint64_t now = f->o->now_ms();
     if (f->shared && !f->announce_state && valid && now >= f->next_request_ms) {
         static uint64_t ids[SH_FRIENDS_MAX];
         static uint8_t message[8 + 14 + SH_FRIENDS_MAX * 9];
         uint32_t n = 0;
-        for (uint32_t i = 0; i < count; ++i) ids[n++] = list[i].steamid;
-        size_t size = sh_cm_request_friend_data(message, sizeof message, SH_CM_FRIEND_DATA_FLAGS, ids, n);
-        bool sent = size && ((send_fn)SHARED(f, 2))(f->shared, f->connection, message, (uint32_t)size);
+        for (uint32_t i = 0; i < count; ++i) if (!list[i].name[0]) ids[n++] = list[i].steamid;
         f->next_request_ms = now + 60000;
-        f->o->event("friends-requested", sent ? (int32_t)n : -1);
+        if (n) {
+            size_t size = sh_cm_request_friend_data(message, sizeof message, SH_CM_FRIEND_DATA_FLAGS, ids, n);
+            bool sent = size && ((send_fn)SHARED(f, 2))(f->shared, f->connection, message, (uint32_t)size);
+            f->o->event("friends-requested", sent ? (int32_t)n : -1);
+        }
     }
     /* Counts only, to tell an empty list from a failing step. */
     if (total != f->last_total) f->o->event("friends-total", total);
@@ -285,10 +289,15 @@ void sh_friends_poll(struct sh_friends *f, bool game_running)
     f->next_command_ms = now + SH_FRIENDS_FEED_MS / 6;
     read_command(f, game_running);
     if (f->shared && f->announce_state && now >= f->announce_ms) {
-        uint8_t message[32];
+        uint8_t message[64];
         size_t size = sh_cm_change_status(message, sizeof message, (uint32_t)f->announce_state);
         bool sent = size && ((send_fn)SHARED(f, 2))(f->shared, f->connection, message, (uint32_t)size);
         f->o->event("friends-signin", sent ? f->announce_state : -1);
+        /* Then, as the window does once the friends list is in, subscribe to
+         * friends' status; without it Steam sends their names only. */
+        size = sh_cm_service_call(message, sizeof message, "Chat.RequestFriendPersonaStates#1");
+        sent = size && ((send_fn)SHARED(f, 2))(f->shared, f->connection, message, (uint32_t)size);
+        f->o->event("friends-subscribed", sent);
         f->announce_state = 0;
     }
     if (!f->friends || now < f->next_feed_ms) return;
@@ -296,9 +305,26 @@ void sh_friends_poll(struct sh_friends *f, bool game_running)
     write_feed(f);
 }
 
-void sh_friends_callback(struct sh_friends *f, int32_t id)
+void sh_friends_callback(struct sh_friends *f, int32_t id, const void *data, int32_t size)
 {
     if (!f->friends) return;
+    /* PersonaStateChange_t {uint64 SteamID; int32 flags}: which kinds of
+     * change (1 name, 2 status, 4 came online, 8 went offline, 16 game, ...)
+     * reach this session. Counts and flag bits only. */
+    if (id == 304 && size >= 12) {
+        uint64_t who;
+        int32_t flags;
+        memcpy(&who, data, sizeof who);
+        memcpy(&flags, (const uint8_t *)data + 8, sizeof flags);
+        if (who != f->self) {
+            ++f->persona_updates;
+            if ((f->persona_flags | flags) != f->persona_flags) {
+                f->persona_flags |= flags;
+                f->o->event("friends-persona-flags", f->persona_flags);
+            }
+            if ((f->persona_updates & 63) == 1) f->o->event("friends-persona-updates", f->persona_updates);
+        }
+    }
     for (unsigned i = 0; i < f->callback_count; ++i) if (f->callback_ids[i] == id) return;
     if (f->callback_count >= sizeof f->callback_ids / sizeof f->callback_ids[0]) return;
     f->callback_ids[f->callback_count++] = id;
@@ -322,6 +348,6 @@ void sh_friends_init(struct sh_friends *f, HMODULE module, void *engine, int32_t
     o->event("friends-available", 0);
 }
 void sh_friends_poll(struct sh_friends *f, bool game_running) { (void)f; (void)game_running; }
-void sh_friends_callback(struct sh_friends *f, int32_t id) { (void)f; (void)id; }
+void sh_friends_callback(struct sh_friends *f, int32_t id, const void *data, int32_t size) { (void)f; (void)id; (void)data; (void)size; }
 void sh_friends_end(struct sh_friends *f) { (void)f; }
 #endif

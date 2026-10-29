@@ -307,7 +307,7 @@ int sh_launch(HMODULE module, void *engine, void *client_user,
             struct sh_callback cb = {0};
             if (!api->get_callback(pipe, &cb)) break;
             bool valid = cb.id > 0 && cb.size >= 0 && (!cb.size || cb.data);
-            if (valid && friends_started) sh_friends_callback(&friends, cb.id);
+            if (valid && friends_started) sh_friends_callback(&friends, cb.id, cb.data, cb.size);
             if (valid && cb.id == 703 && cb.size >= 16) {
                 uint64_t finished; int32_t kind; uint32_t size;
                 memcpy(&finished, cb.data, 8);

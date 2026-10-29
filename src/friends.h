@@ -24,6 +24,8 @@ struct sh_friends {
     int32_t announce_state;
     void *shared;          /* IClientSharedConnection, or NULL */
     uint32_t connection;   /* its allocated connection */
+    int32_t persona_flags; /* PersonaStateChange_t flags seen, OR-ed */
+    int32_t persona_updates;
 };
 
 void sh_friends_init(struct sh_friends *f, HMODULE module, void *engine, int32_t user, int32_t pipe,
@@ -32,7 +34,7 @@ void sh_friends_init(struct sh_friends *f, HMODULE module, void *engine, int32_t
 void sh_friends_poll(struct sh_friends *f, bool game_running);
 /* Records each distinct callback ID seen on the pipe (numbers only), to
  * show which notifications reach this session. */
-void sh_friends_callback(struct sh_friends *f, int32_t id);
+void sh_friends_callback(struct sh_friends *f, int32_t id, const void *data, int32_t size);
 /* Removes the feed so the app never reads a stale list. */
 void sh_friends_end(struct sh_friends *f);
 #endif

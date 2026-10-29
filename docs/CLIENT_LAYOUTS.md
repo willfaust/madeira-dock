@@ -225,3 +225,6 @@ web-UI mode (`0x68f550` true) after posting `SetPersonaStateInternal_t`; the
 status sender `0x590850` needs logon state 4 and drops an unchanged status
 (`0x1d`). Logon setup (`0x9dab1d`) reads `PersonaStateDesired` and
 `AutoSignIntoFriends`.
+
+Service calls use EMsg 151 with header field 12 target_job_name; Dock sends
+`Chat.RequestFriendPersonaStates#1` this way (no response is read).

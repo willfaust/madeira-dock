@@ -300,11 +300,15 @@ build only; other builds report `friends-available=0` and launch as before).
   does not run. Dock sends the two messages that window sends, through the
   client's own shared connection (`IClientSharedConnection`): 2 seconds after
   start `ClientChangeStatus` (the account's stored status, Online on a fresh
-  session), then `ClientRequestFriendData` for the listed friends, at most
-  once a minute. Friends then see the account online and in game, and the
-  session receives friends' status and its own lobby. Reported as
-  `friends-signin-available`, `friends-signin` and `friends-requested`;
-  `MADEIRA_DOCK_FRIENDS_ONLINE=0` sends neither.
+  session), then the `Chat.RequestFriendPersonaStates` service call, which
+  subscribes the session to friends' status. `ClientRequestFriendData` goes
+  only for friends whose name has not loaded (at most once a minute): asking
+  it for loaded friends resets their status to offline. Friends then see the
+  account online and in game, and the session receives friends' status and
+  its own lobby. Reported as `friends-signin-available`, `friends-signin`,
+  `friends-subscribed`, `friends-requested`, and `friends-persona-flags` /
+  `friends-persona-updates` (the kinds and count of friends' status changes);
+  `MADEIRA_DOCK_FRIENDS_ONLINE=0` sends none of them.
 
 - **List:** every 3 seconds, `C:\madeira-friends.bin` (magic `MFRND001`) is
   replaced atomically. It holds at most 250 friends (online or not): SteamID, persona

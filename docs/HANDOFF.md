@@ -513,3 +513,25 @@ Not yet tested: Join from Madeira into a friend's lobby, incoming invites
 (the session now receives friends' data; callback IDs are still logged), and
 the Madeira Friends sheet. The Web API presence code in the app stays
 disabled (it got a refresh token revoked).
+
+## Friends' status subscription, Friends page (2026-10-30, later)
+
+Friends' status stopped arriving although Steam showed the friend online
+elsewhere. `PersonaStateChange_t` flags showed friends' updates carrying only
+name, relationship and name-first-set bits. The Friends window, once the
+friends list is in, calls `Chat.RequestFriendPersonaStates#1` (EMsg 151,
+header target_job_name, empty body); Dock now sends it after
+ClientChangeStatus (`friends-subscribed`). Status then arrived, but Dock's
+once-a-minute ClientRequestFriendData for every friend reset all friends to
+offline (the update carried the went-offline bit). The window sends that
+request only for friends whose name is not loaded; Dock now does the same
+(normally none). The earlier "online" sightings were status changes that
+happened to arrive. Callback 503 (LobbyInvite_t) was seen once on Dock's
+pipe: incoming lobby invites may be readable without the shared-connection
+receive path; not yet examined.
+
+Madeira: the in-game Session menu has a Friends page (DockFriends.swift):
+friends sorted joinable / this game / other game / online / offline, Join for
+joinable friends, Invite for online friends, the result per row. On the iPad,
+with a friend's Steam under Sikarugir: the friend showed online, Join entered
+the friend's lobby and Invite brought the friend into this lobby.
