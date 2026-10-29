@@ -295,8 +295,19 @@ methods, pinned per build like every other method (currently the January
 build only; other builds report `friends-available=0` and launch as before).
 `MADEIRA_DOCK_FRIENDS=0` turns it off.
 
+- **Friends sign-in:** with a web-based UI, Valve's client leaves signing in
+  to Friends to desktop Steam's Friends window, which this headless session
+  does not run. Dock sends the two messages that window sends, through the
+  client's own shared connection (`IClientSharedConnection`): 2 seconds after
+  start `ClientChangeStatus` (the account's stored status, Online on a fresh
+  session), then `ClientRequestFriendData` for the listed friends, at most
+  once a minute. Friends then see the account online and in game, and the
+  session receives friends' status and its own lobby. Reported as
+  `friends-signin-available`, `friends-signin` and `friends-requested`;
+  `MADEIRA_DOCK_FRIENDS_ONLINE=0` sends neither.
+
 - **List:** every 3 seconds, `C:\madeira-friends.bin` (magic `MFRND001`) is
-  replaced atomically. It holds at most 250 friends (online or not; this headless session sees every friend as offline, so Madeira takes live status from the Web API): SteamID, persona
+  replaced atomically. It holds at most 250 friends (online or not): SteamID, persona
   state, the App ID they play, flags (in game, same app, joinable) and a name
   of at most 63 bytes of valid UTF-8 without control characters. Lobby IDs,
   server addresses and connect strings are not exported.
@@ -310,7 +321,15 @@ build only; other builds report `friends-available=0` and launch as before).
   presence `connect` value, printable ASCII, at most 255 bytes) to the running
   game through `NotifyLobbyJoinRequested` / `NotifyRichPresenceJoinRequested`,
   the path the overlay uses when an invite is accepted. The game decides
-  whether to join. **Invite** calls `InviteUserToGame` while the game runs.
+  whether to join. **Invite** works while the game runs. When the account is
+  in a lobby of this game, Dock sends the lobby invite that the friends
+  menu's "Invite to lobby" sends (`ClientMMSInviteToLobby`, through the shared
+  connection); the friend's game joins through its lobby join callback.
+  Otherwise it calls `InviteUserToGame` with the game's rich presence
+  `connect`, else `+connect_lobby <lobby>`, else nothing.
+  `friends-invite-connect` reports which (3 lobby invite, 1 connect, 2
+  connect_lobby, 0 plain) and `friends-own-game` what the client knows of
+  the account's own game (0 nothing ... 4 this app with a lobby).
 - SteamIDs and names go only to the feed file; the report and logs carry
   counts and result codes.
 

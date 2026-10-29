@@ -92,3 +92,53 @@ bool sh_friend_command_parse(const uint8_t *data, size_t size, struct sh_friend_
     command->sequence = sequence;
     return true;
 }
+
+static size_t varint(uint8_t *out, uint32_t v)
+{
+    size_t n = 0;
+    do { out[n] = (uint8_t)(v & 0x7f); v >>= 7; if (v) out[n] |= 0x80; ++n; } while (v);
+    return n;
+}
+
+static size_t cm_header(uint8_t *out, uint32_t emsg)
+{
+    put32(out, emsg | 0x80000000u);
+    put32(out + 4, 0);
+    return 8;
+}
+
+size_t sh_cm_invite_to_lobby(uint8_t *out, size_t cap, uint32_t appid, uint64_t lobby, uint64_t user)
+{
+    if (!out || cap < 8 + 6 + 18 || !appid || !lobby || !sh_friend_steamid_valid(user)) return 0;
+    put32(out, SH_CM_INVITE_TO_LOBBY | 0x80000000u);
+    size_t at = 8;
+    out[at++] = 0x18; at += varint(out + at, appid);   /* header 3 routing_appid */
+    put32(out + 4, (uint32_t)(at - 8));
+    out[at++] = 0x11; put64(out + at, lobby); at += 8;  /* 2 steam_id_lobby */
+    out[at++] = 0x19; put64(out + at, user); at += 8;   /* 3 steam_id_user_invited */
+    return at;
+}
+
+size_t sh_cm_change_status(uint8_t *out, size_t cap, uint32_t state)
+{
+    if (!out || cap < 8 + 1 + 5 + 6) return 0;
+    size_t at = cm_header(out, SH_CM_CHANGE_STATUS);
+    out[at++] = 0x08; at += varint(out + at, state);     /* 1 persona_state */
+    out[at++] = 0x28; out[at++] = 0;                    /* 5 persona_set_by_user */
+    out[at++] = 0x38; out[at++] = 1;                    /* 7 need_persona_response */
+    out[at++] = 0x40; out[at++] = 0;                    /* 8 is_client_idle */
+    return at;
+}
+
+size_t sh_cm_request_friend_data(uint8_t *out, size_t cap, uint32_t flags, const uint64_t *ids, uint32_t count)
+{
+    if (!out || (count && !ids) || count > SH_FRIENDS_MAX || cap < 8 + 1 + 5 + (size_t)count * 9) return 0;
+    size_t at = cm_header(out, SH_CM_REQUEST_FRIEND_DATA);
+    out[at++] = 0x08; at += varint(out + at, flags);     /* 1 persona_state_requested */
+    for (uint32_t i = 0; i < count; ++i) {               /* 2 friends, fixed64 */
+        out[at++] = 0x11;
+        put64(out + at, ids[i]);
+        at += 8;
+    }
+    return at;
+}

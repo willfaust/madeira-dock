@@ -58,4 +58,20 @@ bool sh_friend_steamid_valid(uint64_t steamid);
 /* Returns the encoded size, or 0 if out is too small or count exceeds the cap. */
 size_t sh_friends_feed_encode(uint8_t *out, size_t cap, const struct sh_friend *friends, uint32_t count);
 bool sh_friend_command_parse(const uint8_t *data, size_t size, struct sh_friend_command *command);
+
+/* Steam server messages as desktop Steam's Friends window builds them: EMsg
+ * with the protobuf bit, header length 0 (the client fills the header), body.
+ * Both return the size, or 0 if out is too small. */
+#define SH_CM_CHANGE_STATUS 716u
+#define SH_CM_REQUEST_FRIEND_DATA 815u
+#define SH_CM_FRIEND_DATA_FLAGS 1106u   /* what the Friends window asks for */
+/* CMsgClientChangeStatus: persona_state, persona_set_by_user false,
+ * need_persona_response true, is_client_idle false. */
+size_t sh_cm_change_status(uint8_t *out, size_t cap, uint32_t state);
+/* CMsgClientRequestFriendData: persona_state_requested, friends (fixed64). */
+size_t sh_cm_request_friend_data(uint8_t *out, size_t cap, uint32_t flags, const uint64_t *ids, uint32_t count);
+#define SH_CM_INVITE_TO_LOBBY 6621u
+/* CMsgClientMMSInviteToLobby as the friends menu's "Invite to lobby" sends
+ * it: header routing_appid, body steam_id_lobby and steam_id_user_invited. */
+size_t sh_cm_invite_to_lobby(uint8_t *out, size_t cap, uint32_t appid, uint64_t lobby, uint64_t user);
 #endif

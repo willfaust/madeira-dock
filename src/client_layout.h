@@ -22,11 +22,14 @@ struct dock_client_layout {
      * IClientFriendsMap slots 7 GetFriendCount, 10 GetFriendByIndex, 13
      * GetFriendPersonaState, 14 GetFriendPersonaName, 23 GetFriendGamePlayed,
      * 93 GetFriendRichPresence, 215 InviteUserToGame, 194 NotifyLobbyJoinRequested,
-     * 195 NotifyRichPresenceJoinRequested, 4 GetPersonaState, 5 SetPersonaState, 32 RequestUserInformation. Zero where a build was not inspected:
+     * 195 NotifyRichPresenceJoinRequested, 4 GetPersonaState, 5 SetPersonaState, 32 RequestUserInformation. Friends sign-in: CSteamClient
+     * slot 69 GetIClientSharedConnection, then IClientSharedConnectionMap slots 0
+     * AllocateSharedConnection and 2 SendMessage. Zero where a build was not inspected:
      * the friends feature is then unavailable and the launch is unaffected. */
     uintptr_t engine_friends, friend_count, friend_by_index, friend_state, friend_name,
         friend_game, friend_presence, friend_invite, friend_join_lobby, friend_join_presence,
-        persona_state, set_persona_state, request_user_info;
+        persona_state, set_persona_state, request_user_info,
+        engine_shared, shared_allocate, shared_send;
 };
 const struct dock_client_layout *dock_client_layout(const char *sha256);
 bool dock_method_is(uintptr_t module, void *object, unsigned slot, uintptr_t rva);

@@ -17,7 +17,7 @@ source = (Path(__file__).resolve().parents[1] / 'src/client_layout.c').read_text
 block = re.search(r'"' + fingerprint + r'",\s*(\d+),([^}]+)', source)
 assert block, 'Unknown SHA-256; never infer a layout from similar metadata'
 rvas = [int(x, 16) for x in re.findall(r'0x[0-9a-f]+', block[2])]
-assert len(rvas) == 31
+assert len(rvas) == 34
 pe = struct.unpack_from('<I', raw, 0x3c)[0]
 assert raw[pe:pe+4] == b'PE\0\0' and struct.unpack_from('<H', raw, pe+4)[0] == 0x8664
 sections = struct.unpack_from('<H', raw, pe+6)[0]
@@ -54,7 +54,9 @@ groups = [('CSteamClient',[8,33,43],rvas[:3]),
           ('IClientUserMap',[71],rvas[14:15]),
           ('IClientUserMap',[5,214,215],rvas[15:18]),
           ('CSteamClient',[13],rvas[18:19]),
-          ('IClientFriendsMap',[7,10,13,14,23,93,215,194,195,4,5,32],rvas[19:31])]
+          ('IClientFriendsMap',[7,10,13,14,23,93,215,194,195,4,5,32],rvas[19:31]),
+          ('CSteamClient',[69],rvas[31:32]),
+          ('IClientSharedConnectionMap',[0,2],rvas[32:34])]
 for name,slots,expected in groups:
     if not any(expected):
         print(f'SKIP: {name} {slots} not pinned for this build (feature unavailable)')
@@ -101,3 +103,14 @@ if any(rvas[19:31]):
     for rva, (name, function_id) in zip(rvas[19:31], FRIENDS):
         assert names_method(rva, name, function_id, 0x400), f'{hex(rva)} is not {name}'
     print('PASS: IClientFriendsMap pinned slots name their methods and IPC function IDs')
+
+# Friends sign-in: the shared-connection wrappers must name their methods and
+# serialize their IPC function IDs; slot 69 must return the per-user
+# interface stored at 0x118, where the bundle constructor puts the
+# IClientSharedConnectionMap it creates.
+if any(rvas[31:34]):
+    for rva, name, function_id in ((rvas[32], 'AllocateSharedConnection', 0x309e429d),
+                                   (rvas[33], 'SendMessage', 0x8ad70af2)):
+        assert names_method(rva, name, function_id), f'{hex(rva)} is not {name}'
+    assert b'\x48\x8b\x83\x18\x01\x00\x00' in image[rvas[31]:rvas[31]+0x80], 'slot 69 does not return the 0x118 interface'
+    print('PASS: CSteamClient slot 69 and IClientSharedConnectionMap slots 0/2 (AllocateSharedConnection, SendMessage)')

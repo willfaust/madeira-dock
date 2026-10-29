@@ -29,8 +29,6 @@ _Static_assert(sizeof(struct game_info) == 24, "FriendGameInfo_t");
 typedef void *(__thiscall *get_friends_fn)(void *, int32_t, int32_t);
 typedef int32_t (__thiscall *count_fn)(void *, int32_t);
 typedef int32_t (__thiscall *own_state_fn)(void *);
-typedef void (__thiscall *set_state_fn)(void *, int32_t);
-typedef bool (__thiscall *request_info_fn)(void *, uint64_t, bool);
 typedef void *(__thiscall *by_index_fn)(void *, uint64_t *, int32_t, int32_t);
 typedef int32_t (__thiscall *state_fn)(void *, uint64_t);
 typedef const char *(__thiscall *name_fn)(void *, uint64_t);
@@ -39,8 +37,12 @@ typedef const char *(__thiscall *presence_fn)(void *, uint32_t, uint64_t, const 
 typedef bool (__thiscall *invite_fn)(void *, uint32_t, uint64_t, const char *);
 typedef bool (__thiscall *join_lobby_fn)(void *, uint32_t, uint64_t, uint64_t);
 typedef bool (__thiscall *join_presence_fn)(void *, uint32_t, uint64_t, const char *);
+typedef void *(__thiscall *get_shared_fn)(void *, int32_t, int32_t);
+typedef uint32_t (__thiscall *allocate_fn)(void *);
+typedef bool (__thiscall *send_fn)(void *, uint32_t, const void *, uint32_t);
 
 #define SLOT(f, n) ((*(void ***)(f)->friends)[n])
+#define SHARED(f, n) ((*(void ***)(f)->shared)[n])
 
 static bool disabled(void)
 {
@@ -78,24 +80,33 @@ void sh_friends_init(struct sh_friends *f, HMODULE module, void *engine, int32_t
     f->friends = friends;
     f->layout = layout;
     o->event("friends-available", 1);
-    /* Steam sends friends' status only to a session that is online in
-     * Friends; desktop Steam announces that after sign-in. The stored state
-     * (1 Online on a fresh session) is announced again so the servers push
-     * friends' status; Offline becomes Online. A state the user chose (Away,
-     * Invisible, ...) is announced as it is. MADEIRA_DOCK_FRIENDS_ONLINE=0
-     * announces nothing. */
+    /* Desktop Steam's Friends window, not the client, signs in to Friends:
+     * with a web-based UI the client leaves the status change to the window
+     * (SetPersonaStateInternal_t). The window sends ClientChangeStatus and
+     * ClientRequestFriendData itself through the client's shared connection,
+     * so Dock sends the same two messages that way (sh_friends_poll).
+     * MADEIRA_DOCK_FRIENDS_ONLINE=0 sends neither. */
     int32_t own = ((own_state_fn)SLOT(f, 4))(friends);
     o->event("friends-own-state", own);
     wchar_t online[4] = {0};
     bool keep = GetEnvironmentVariableW(L"MADEIRA_DOCK_FRIENDS_ONLINE", online, 4) == 1 && online[0] == L'0';
-    if (!keep) {
-        /* Setting the state it already has may send nothing, so go Offline
-         * first and announce the wanted state 2 s later (sh_friends_poll). */
-        ((set_state_fn)SLOT(f, 5))(friends, 0);
-        f->announce_state = own > 0 ? own : 1;
-        f->announce_ms = o->now_ms() + 2000;
-        o->event("friends-set-online", 0);
+    if (keep || !dock_method_is(base, engine, 69, layout->engine_shared)) {
+        o->event("friends-signin-available", 0);
+        return;
     }
+    void *shared = ((get_shared_fn)(*(void ***)engine)[69])(engine, user, pipe);
+    if (!shared || !dock_method_is(base, shared, 0, layout->shared_allocate) ||
+        !dock_method_is(base, shared, 2, layout->shared_send)) {
+        o->event("friends-signin-available", 0);
+        return;
+    }
+    f->shared = shared;
+    f->connection = ((allocate_fn)SHARED(f, 0))(shared);
+    o->event("friends-signin-available", f->connection ? 1 : 2);
+    if (!f->connection) { f->shared = NULL; return; }
+    /* The stored state (Online on a fresh session); Offline becomes Online. */
+    f->announce_state = own > 0 ? own : 1;
+    f->announce_ms = o->now_ms() + 2000;
 }
 
 static uint32_t game_app(const struct game_info *game)
@@ -142,8 +153,7 @@ static void write_feed(struct sh_friends *f)
             if (((game_fn)SLOT(f, 23))(f->friends, id, &probe) && probe.game) ++playing;
         }
         int32_t state = sh_friend_steamid_valid(id) ? ((state_fn)SLOT(f, 13))(f->friends, id) : 0;
-        /* All friends are listed: this headless session sees every friend as
-         * offline, so Madeira takes live status from Steam's Web API. */
+        /* All friends are listed, online or not. */
         if (!sh_friend_steamid_valid(id)) continue;
         if (state < 0) state = 0;
         if (state > 0) ++online;
@@ -163,18 +173,18 @@ static void write_feed(struct sh_friends *f)
             }
         }
     }
-    /* Desktop Steam asks for each friend's persona data; without that this
-     * session never hears friends' status. At most once a minute. */
+    /* As the Friends window does: ask for every friend's persona data, at
+     * most once a minute. */
     uint64_t now = f->o->now_ms();
-    if (valid && now >= f->next_request_ms) {
-        int32_t requested = 0;
-        for (int32_t i = 0; i < total && i < 2000; ++i) {
-            uint64_t id = 0;
-            ((by_index_fn)SLOT(f, 10))(f->friends, &id, i, SH_FRIEND_FLAG_IMMEDIATE);
-            if (sh_friend_steamid_valid(id) && ((request_info_fn)SLOT(f, 32))(f->friends, id, false)) ++requested;
-        }
+    if (f->shared && !f->announce_state && valid && now >= f->next_request_ms) {
+        static uint64_t ids[SH_FRIENDS_MAX];
+        static uint8_t message[8 + 14 + SH_FRIENDS_MAX * 9];
+        uint32_t n = 0;
+        for (uint32_t i = 0; i < count; ++i) ids[n++] = list[i].steamid;
+        size_t size = sh_cm_request_friend_data(message, sizeof message, SH_CM_FRIEND_DATA_FLAGS, ids, n);
+        bool sent = size && ((send_fn)SHARED(f, 2))(f->shared, f->connection, message, (uint32_t)size);
         f->next_request_ms = now + 60000;
-        f->o->event("friends-requested", requested);
+        f->o->event("friends-requested", sent ? (int32_t)n : -1);
     }
     /* Counts only, to tell an empty list from a failing step. */
     if (total != f->last_total) f->o->event("friends-total", total);
@@ -215,8 +225,21 @@ static int32_t run_command(struct sh_friends *f, const struct sh_friend_command 
         char connect[SH_FRIEND_CONNECT_CAP] = "";
         int32_t kind = 0;
         struct game_info own = {0};
+        /* What the client knows of this player's own game: 0 nothing, 1 no
+         * game, 2 another app, 3 this app without a lobby, 4 with a lobby. */
+        bool have = ((game_fn)SLOT(f, 23))(f->friends, f->self, &own);
+        f->o->event("friends-own-game", !have ? 0 : !own.game ? 1 : game_app(&own) != f->appid ? 2 : own.lobby ? 4 : 3);
+        /* In a lobby, the friends menu's "Invite to lobby": a lobby invite,
+         * which games accept through their lobby join callback. */
+        if (have && own.lobby && game_app(&own) == f->appid && f->shared) {
+            uint8_t message[40];
+            size_t size = sh_cm_invite_to_lobby(message, sizeof message, f->appid, own.lobby, c->steamid);
+            f->o->event("friends-invite-connect", 3);
+            return size && ((send_fn)SHARED(f, 2))(f->shared, f->connection, message, (uint32_t)size)
+                ? SH_FRIEND_DONE : SH_FRIEND_CALL_FAILED;
+        }
         if (friend_connect(f, f->self, connect)) kind = 1;
-        else if (((game_fn)SLOT(f, 23))(f->friends, f->self, &own) && own.lobby) {
+        else if (have && own.lobby) {
             snprintf(connect, sizeof connect, "+connect_lobby %llu", (unsigned long long)own.lobby);
             kind = 2;
         }
@@ -261,14 +284,12 @@ void sh_friends_poll(struct sh_friends *f, bool game_running)
     if (now < f->next_command_ms) return;
     f->next_command_ms = now + SH_FRIENDS_FEED_MS / 6;
     read_command(f, game_running);
-    if (f->friends && f->announce_state && now >= f->announce_ms) {
-        ((set_state_fn)SLOT(f, 5))(f->friends, f->announce_state);
-        f->o->event("friends-set-online", f->announce_state);
+    if (f->shared && f->announce_state && now >= f->announce_ms) {
+        uint8_t message[32];
+        size_t size = sh_cm_change_status(message, sizeof message, (uint32_t)f->announce_state);
+        bool sent = size && ((send_fn)SHARED(f, 2))(f->shared, f->connection, message, (uint32_t)size);
+        f->o->event("friends-signin", sent ? f->announce_state : -1);
         f->announce_state = 0;
-    }
-    if (f->friends && f->announce_ms && !f->announce_state && now >= f->announce_ms + 5000) {
-        f->o->event("friends-own-state-after", ((own_state_fn)SLOT(f, 4))(f->friends));
-        f->announce_ms = 0;
     }
     if (!f->friends || now < f->next_feed_ms) return;
     f->next_feed_ms = now + SH_FRIENDS_FEED_MS;

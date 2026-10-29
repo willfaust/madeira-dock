@@ -197,3 +197,31 @@ Consequences for the plan:
   launch path. Untested live.
 - Host lifetime: the launch loop polls callbacks every 50 ms until 3 s after
   the game exits, so the friends feed and commands can run in that loop.
+
+## Friends sign-in (January build, 2026-10-30)
+
+| Where | RVA | What |
+| --- | --- | --- |
+| CSteamClient slot 69 | 0x9447d0 | GetIClientSharedConnection(user, pipe): same shape as slot 13, returns `ClientInterfaces_t+0x118`, where the bundle constructor (`0x9ed519`) stores the object built at `0x729cc0` (vtable IClientSharedConnectionMap) |
+| IClientSharedConnectionMap 0 | 0x70a0b0 | AllocateSharedConnection() -> uint32 handle (IPC 0x309e429d) |
+| IClientSharedConnectionMap 2 | 0x832cb0 | SendMessage(uint32 handle, const void *data, uint32 size) -> bool (IPC 0x8ad70af2) |
+
+Other slots, not called: 1 ReleaseSharedConnection, 3
+SendMessageAndAwaitResponse, 4 RegisterEMsgHandler, 5
+RegisterServiceMethodHandler, 6 BPopReceivedMessage, 7 InitiateConnection.
+
+A message is `uint32 EMsg | 0x80000000`, `uint32` header length, a
+CMsgProtoBufHeader (empty, or `routing_appid` field 3), then the body; the
+client fills SteamID and session as for the web UI. Field numbers come from
+the Friends window's own message definitions: CMsgClientChangeStatus 1
+persona_state, 5 persona_set_by_user, 7 need_persona_response, 8
+is_client_idle; CMsgClientRequestFriendData 1 persona_state_requested, 2
+friends (fixed64); CMsgClientMMSInviteToLobby 2 steam_id_lobby, 3
+steam_id_user_invited (fixed64). Builders: `src/friends_format.c`, byte-checked
+in `tests/test-friends_format.c`.
+
+Why it is needed: `SetPersonaStateInternal` (`0x9e61d0`) returns early in
+web-UI mode (`0x68f550` true) after posting `SetPersonaStateInternal_t`; the
+status sender `0x590850` needs logon state 4 and drops an unchanged status
+(`0x1d`). Logon setup (`0x9dab1d`) reads `PersonaStateDesired` and
+`AutoSignIntoFriends`.

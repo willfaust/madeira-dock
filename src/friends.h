@@ -22,6 +22,8 @@ struct sh_friends {
     int32_t callback_ids[48];
     unsigned callback_count;
     int32_t announce_state;
+    void *shared;          /* IClientSharedConnection, or NULL */
+    uint32_t connection;   /* its allocated connection */
 };
 
 void sh_friends_init(struct sh_friends *f, HMODULE module, void *engine, int32_t user, int32_t pipe,

@@ -92,5 +92,22 @@ int main(void)
     command(raw, SH_FRIEND_JOIN, ID(7), 3); raw[0] = 'X';
     assert(!sh_friend_command_parse(raw, size, &parsed));
     assert(!sh_friend_command_parse(NULL, size, &parsed));
-    puts("PASS: friends feed bounds, name/connect sanitizing, SteamID and command validation");
+    uint8_t msg[8 + 14 + SH_FRIENDS_MAX * 9];
+    size = sh_cm_change_status(msg, sizeof msg, 1);
+    static const uint8_t status[] = {0xcc, 0x02, 0, 0x80, 0, 0, 0, 0, 0x08, 1, 0x28, 0, 0x38, 1, 0x40, 0};
+    assert(size == sizeof status && !memcmp(msg, status, size));
+    assert(!sh_cm_change_status(msg, 10, 1));
+    uint64_t ids[2] = {ID(5), ID(6)};
+    size = sh_cm_request_friend_data(msg, sizeof msg, SH_CM_FRIEND_DATA_FLAGS, ids, 2);
+    static const uint8_t request[] = {0x2f, 0x03, 0, 0x80, 0, 0, 0, 0, 0x08, 0xd2, 0x08};
+    assert(size == sizeof request + 18 && !memcmp(msg, request, sizeof request));
+    assert(msg[11] == 0x11 && msg[12] == 5 && msg[19] == 1 && msg[20] == 0x11 && msg[21] == 6);
+    assert(!sh_cm_request_friend_data(msg, sizeof msg, 1, ids, SH_FRIENDS_MAX + 1));
+    assert(!sh_cm_request_friend_data(msg, 20, 1, ids, 2));
+    size = sh_cm_invite_to_lobby(msg, sizeof msg, 480, 0x0186000000000001ULL, ID(9));
+    static const uint8_t invite[] = {0xdd, 0x19, 0, 0x80, 3, 0, 0, 0, 0x18, 0xe0, 0x03, 0x11, 1};
+    assert(size == 8 + 3 + 18 && !memcmp(msg, invite, sizeof invite) && msg[19] == 0x01 && msg[20] == 0x19 && msg[21] == 9);
+    assert(!sh_cm_invite_to_lobby(msg, sizeof msg, 480, 0, ID(9)));
+    assert(!sh_cm_invite_to_lobby(msg, sizeof msg, 480, 1, 0x0170000100000009ULL));
+    puts("PASS: friends feed bounds, name/connect sanitizing, SteamID and command validation, Friends sign-in messages");
 }

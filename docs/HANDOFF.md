@@ -483,3 +483,33 @@ in order), and whether games react to the join notifications. Invites carry
 an empty connect string. Not done: the app side (Madeira reads nothing yet),
 join at launch (`MADEIRA_STEAM_HOST_ARGUMENTS` with `+connect_lobby`),
 incoming invites. Needs a live client and a second account to verify.
+
+## Friends sign-in, lobby invites (2026-10-30)
+
+Device test (iPad, January client, second account) found the headless
+session offline to friends, every friend offline, and no record of its own
+game or lobby, so invites had no Join button. Cause: `SetPersonaStateInternal`
+(`0x9e61d0`) checks `0x68f550` (web-UI mode) and then only posts
+`SetPersonaStateInternal_t` (`0xfde9b`) for desktop Steam's Friends window;
+the window signs in. The Friends window's script (`steamui_websrc_all`,
+`chunk~2dcc5aaf7.js`) sends on logon `ClientChangeStatus` (EMsg 716:
+persona_state, persona_set_by_user false, need_persona_response true,
+is_client_idle false) and `ClientRequestFriendData` (EMsg 815, flags 1106,
+friend IDs), through `SteamClient.SharedConnection.SendMsg`, which SteamUI
+maps to IClientSharedConnection. Dock now does the same (CSteamClient slot 69,
+IClientSharedConnectionMap slots 0/2; see CLIENT_LAYOUTS.md). The earlier
+Offline/Online toggle and per-friend RequestUserInformation calls are gone;
+those pins remain but are not called.
+
+Result on the iPad: `friends-signin=1`, `friends-requested=12`,
+`friends-online` 1, `friends-own-game=4`. The friend saw the account Online
+and In-Game. Invites with `+connect_lobby` (InviteUserToGame) showed a Join
+button but the game did not join; the friends menu's "Invite to lobby"
+(EMsg 6621 `ClientMMSInviteToLobby`: header routing_appid, steam_id_lobby,
+steam_id_user_invited), now sent whenever the own lobby is known
+(`friends-invite-connect=3`), joined the friend into the lobby.
+
+Not yet tested: Join from Madeira into a friend's lobby, incoming invites
+(the session now receives friends' data; callback IDs are still logged), and
+the Madeira Friends sheet. The Web API presence code in the app stays
+disabled (it got a refresh token revoked).
