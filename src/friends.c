@@ -29,6 +29,7 @@ typedef void *(__thiscall *get_friends_fn)(void *, int32_t, int32_t);
 typedef int32_t (__thiscall *count_fn)(void *, int32_t);
 typedef int32_t (__thiscall *own_state_fn)(void *);
 typedef void (__thiscall *set_state_fn)(void *, int32_t);
+typedef bool (__thiscall *request_info_fn)(void *, uint64_t, bool);
 typedef void *(__thiscall *by_index_fn)(void *, uint64_t *, int32_t, int32_t);
 typedef int32_t (__thiscall *state_fn)(void *, uint64_t);
 typedef const char *(__thiscall *name_fn)(void *, uint64_t);
@@ -66,7 +67,7 @@ void sh_friends_init(struct sh_friends *f, HMODULE module, void *engine, int32_t
         {7, layout->friend_count}, {10, layout->friend_by_index}, {13, layout->friend_state},
         {14, layout->friend_name}, {23, layout->friend_game}, {93, layout->friend_presence},
         {215, layout->friend_invite}, {194, layout->friend_join_lobby}, {195, layout->friend_join_presence},
-        {4, layout->persona_state}, {5, layout->set_persona_state}};
+        {4, layout->persona_state}, {5, layout->set_persona_state}, {32, layout->request_user_info}};
     for (unsigned i = 0; i < sizeof methods / sizeof methods[0]; ++i)
         if (!dock_method_is(base, friends, methods[i].slot, methods[i].rva)) {
             o->event("friends-available", 0);
@@ -159,6 +160,19 @@ static void write_feed(struct sh_friends *f)
                 if (game.lobby || friend_connect(f, id, connect)) entry->flags |= SH_FRIEND_JOINABLE;
             }
         }
+    }
+    /* Desktop Steam asks for each friend's persona data; without that this
+     * session never hears friends' status. At most once a minute. */
+    uint64_t now = f->o->now_ms();
+    if (valid && now >= f->next_request_ms) {
+        int32_t requested = 0;
+        for (int32_t i = 0; i < total && i < 2000; ++i) {
+            uint64_t id = 0;
+            ((by_index_fn)SLOT(f, 10))(f->friends, &id, i, SH_FRIEND_FLAG_IMMEDIATE);
+            if (sh_friend_steamid_valid(id) && ((request_info_fn)SLOT(f, 32))(f->friends, id, false)) ++requested;
+        }
+        f->next_request_ms = now + 60000;
+        f->o->event("friends-requested", requested);
     }
     /* Counts only, to tell an empty list from a failing step. */
     if (total != f->last_total) f->o->event("friends-total", total);

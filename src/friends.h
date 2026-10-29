@@ -18,7 +18,7 @@ struct sh_friends {
     uint32_t appid, last_sequence;
     uint64_t next_command_ms, next_feed_ms;
     int32_t last_count, last_total, last_valid, last_named, last_playing, last_online;
-    uint64_t started_ms, announce_ms;
+    uint64_t started_ms, announce_ms, next_request_ms;
     int32_t announce_state;
 };
 
