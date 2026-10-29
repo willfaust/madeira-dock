@@ -135,7 +135,10 @@ static void write_feed(struct sh_friends *f)
             if (((game_fn)SLOT(f, 23))(f->friends, id, &probe) && probe.game) ++playing;
         }
         int32_t state = sh_friend_steamid_valid(id) ? ((state_fn)SLOT(f, 13))(f->friends, id) : 0;
-        if (state <= 0) continue;                   /* offline friends are left out */
+        /* All friends are listed: this headless session sees every friend as
+         * offline, so Madeira takes live status from Steam's Web API. */
+        if (!sh_friend_steamid_valid(id)) continue;
+        if (state < 0) state = 0;
         struct sh_friend *entry = &list[count++];
         memset(entry, 0, sizeof *entry);
         entry->steamid = id;

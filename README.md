@@ -296,7 +296,7 @@ build only; other builds report `friends-available=0` and launch as before).
 `MADEIRA_DOCK_FRIENDS=0` turns it off.
 
 - **List:** every 3 seconds, `C:\madeira-friends.bin` (magic `MFRND001`) is
-  replaced atomically. It holds at most 250 online friends: SteamID, persona
+  replaced atomically. It holds at most 250 friends (online or not; this headless session sees every friend as offline, so Madeira takes live status from the Web API): SteamID, persona
   state, the App ID they play, flags (in game, same app, joinable) and a name
   of at most 63 bytes of valid UTF-8 without control characters. Lobby IDs,
   server addresses and connect strings are not exported.
