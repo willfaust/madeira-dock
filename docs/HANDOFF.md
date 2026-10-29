@@ -545,3 +545,12 @@ lobby and forgets the invite. The Friends page lists inviters first with
 "Invited you to play" and Accept. On the iPad the friend's invite appeared and
 Accept joined the friend's lobby. Invites from game invites with a connect
 string (GameRichPresenceJoinRequested, chat messages) are not handled.
+
+Follow-up: an invisible friend who invited showed as in game (the client
+still knows the game); the feed now sets game flags only for friends shown
+online, and Join without an invite refuses friends shown offline. The app's
+Join result reads "Sent to the game" (the game decides whether it gets in)
+and results clear after 5 s. Dock's report uses CRLF; the app splits on any
+newline. Accepting an invite to a lobby the friend has left put the player in
+the friend's new lobby: Dock passes the invited lobby and the friend, so the
+game or the client followed the friend.

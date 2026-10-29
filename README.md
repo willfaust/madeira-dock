@@ -313,7 +313,8 @@ build only; other builds report `friends-available=0` and launch as before).
 - **List:** every 3 seconds, `C:\madeira-friends.bin` (magic `MFRND001`) is
   replaced atomically. It holds at most 250 friends (online or not): SteamID, persona
   state, the App ID they play, flags (in game, same app, joinable, invited
-  this player) and a name
+  this player; a friend who appears offline, invisible included, shows no
+  game, as in desktop Steam) and a name
   of at most 63 bytes of valid UTF-8 without control characters. Lobby IDs,
   server addresses and connect strings are not exported.
 - **Commands:** the app writes `C:\madeira-friends-cmd.bin` (magic

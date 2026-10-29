@@ -179,8 +179,10 @@ static void write_feed(struct sh_friends *f)
         entry->state = (uint32_t)state;
         sh_friend_name_copy(entry->name, sizeof entry->name, ((name_fn)SLOT(f, 14))(f->friends, id));
         if (invited_lobby(f, id)) entry->flags |= SH_FRIEND_INVITED;
+        /* A friend who appears offline (invisible included) shows no game,
+         * as in desktop Steam, though the client may still know one. */
         struct game_info game = {0};
-        if (((game_fn)SLOT(f, 23))(f->friends, id, &game) && game.game) {
+        if (state > 0 && ((game_fn)SLOT(f, 23))(f->friends, id, &game) && game.game) {
             entry->flags |= SH_FRIEND_IN_GAME;
             entry->appid = game_app(&game);
             if (entry->appid && entry->appid == f->appid) {
@@ -275,7 +277,8 @@ static int32_t run_command(struct sh_friends *f, const struct sh_friend_command 
             ? SH_FRIEND_DONE : SH_FRIEND_CALL_FAILED;
     }
     struct game_info game = {0};
-    if (!((game_fn)SLOT(f, 23))(f->friends, c->steamid, &game) || game_app(&game) != f->appid)
+    if (((state_fn)SLOT(f, 13))(f->friends, c->steamid) <= 0 ||
+        !((game_fn)SLOT(f, 23))(f->friends, c->steamid, &game) || game_app(&game) != f->appid)
         return SH_FRIEND_NOT_JOINABLE;
     if (game.lobby)
         return ((join_lobby_fn)SLOT(f, 194))(f->friends, f->appid, game.lobby, c->steamid)
