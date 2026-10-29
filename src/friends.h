@@ -17,7 +17,7 @@ struct sh_friends {
     const struct sh_observer *o;
     uint32_t appid, last_sequence;
     uint64_t next_command_ms, next_feed_ms;
-    int32_t last_count;
+    int32_t last_count, last_total, last_valid;
 };
 
 void sh_friends_init(struct sh_friends *f, HMODULE module, void *engine, int32_t user, int32_t pipe,
