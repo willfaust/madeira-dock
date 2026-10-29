@@ -52,7 +52,7 @@ void sh_friends_init(struct sh_friends *f, HMODULE module, void *engine, int32_t
     memset(f, 0, sizeof *f);
     f->o = o;
     f->appid = appid;
-    f->last_count = f->last_total = f->last_valid = f->last_named = f->last_playing = -1;
+    f->last_count = f->last_total = f->last_valid = f->last_named = f->last_playing = f->last_online = -1;
     f->started_ms = o->now_ms();
     DeleteFileW(feed_path);
     DeleteFileW(command_path);
@@ -86,8 +86,12 @@ void sh_friends_init(struct sh_friends *f, HMODULE module, void *engine, int32_t
     wchar_t online[4] = {0};
     bool keep = GetEnvironmentVariableW(L"MADEIRA_DOCK_FRIENDS_ONLINE", online, 4) == 1 && online[0] == L'0';
     if (!keep) {
-        ((set_state_fn)SLOT(f, 5))(friends, own > 0 ? own : 1);
-        o->event("friends-set-online", own > 0 ? own : 1);
+        /* Setting the state it already has may send nothing, so go Offline
+         * first and announce the wanted state 2 s later (sh_friends_poll). */
+        ((set_state_fn)SLOT(f, 5))(friends, 0);
+        f->announce_state = own > 0 ? own : 1;
+        f->announce_ms = o->now_ms() + 2000;
+        o->event("friends-set-online", 0);
     }
 }
 
@@ -123,7 +127,7 @@ static void write_feed(struct sh_friends *f)
     static uint8_t feed[SH_FRIENDS_FEED_CAP];
     int32_t total = ((count_fn)SLOT(f, 7))(f->friends, SH_FRIEND_FLAG_IMMEDIATE);
     uint32_t count = 0;
-    int32_t valid = 0, named = 0, playing = 0;
+    int32_t valid = 0, named = 0, playing = 0, online = 0;
     for (int32_t i = 0; i < total && i < 2000 && count < SH_FRIENDS_MAX; ++i) {
         uint64_t id = 0;
         ((by_index_fn)SLOT(f, 10))(f->friends, &id, i, SH_FRIEND_FLAG_IMMEDIATE);
@@ -139,6 +143,7 @@ static void write_feed(struct sh_friends *f)
          * offline, so Madeira takes live status from Steam's Web API. */
         if (!sh_friend_steamid_valid(id)) continue;
         if (state < 0) state = 0;
+        if (state > 0) ++online;
         struct sh_friend *entry = &list[count++];
         memset(entry, 0, sizeof *entry);
         entry->steamid = id;
@@ -158,7 +163,9 @@ static void write_feed(struct sh_friends *f)
     /* Counts only, to tell an empty list from a failing step. */
     if (total != f->last_total) f->o->event("friends-total", total);
     if (valid != f->last_valid) f->o->event("friends-valid-ids", valid);
-    if (named != f->last_named || playing != f->last_playing || (int32_t)count != f->last_count) {
+    if (named != f->last_named || playing != f->last_playing || online != f->last_online ||
+        (int32_t)count != f->last_count) {
+        f->o->event("friends-online", online);
         f->o->event("friends-named", named);
         f->o->event("friends-playing", playing);
         f->o->event("friends-seconds", (int32_t)((f->o->now_ms() - f->started_ms) / 1000));
@@ -167,6 +174,7 @@ static void write_feed(struct sh_friends *f)
     f->last_valid = valid;
     f->last_named = named;
     f->last_playing = playing;
+    f->last_online = online;
     size_t size = sh_friends_feed_encode(feed, sizeof feed, list, count);
     HANDLE file = size ? CreateFileW(feed_temp, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, NULL) : INVALID_HANDLE_VALUE;
     if (file == INVALID_HANDLE_VALUE) return;
@@ -226,6 +234,15 @@ void sh_friends_poll(struct sh_friends *f, bool game_running)
     if (now < f->next_command_ms) return;
     f->next_command_ms = now + SH_FRIENDS_FEED_MS / 6;
     read_command(f, game_running);
+    if (f->friends && f->announce_state && now >= f->announce_ms) {
+        ((set_state_fn)SLOT(f, 5))(f->friends, f->announce_state);
+        f->o->event("friends-set-online", f->announce_state);
+        f->announce_state = 0;
+    }
+    if (f->friends && f->announce_ms && !f->announce_state && now >= f->announce_ms + 5000) {
+        f->o->event("friends-own-state-after", ((own_state_fn)SLOT(f, 4))(f->friends));
+        f->announce_ms = 0;
+    }
     if (!f->friends || now < f->next_feed_ms) return;
     f->next_feed_ms = now + SH_FRIENDS_FEED_MS;
     write_feed(f);
