@@ -511,8 +511,8 @@ steam_id_user_invited), now sent whenever the own lobby is known
 
 Not yet tested: Join from Madeira into a friend's lobby, incoming invites
 (the session now receives friends' data; callback IDs are still logged), and
-the Madeira Friends sheet. The Web API presence code in the app stays
-disabled (it got a refresh token revoked).
+the Madeira Friends sheet. The app's Web API presence code (it got a
+refresh token revoked) has since been removed.
 
 ## Friends' status subscription, Friends page (2026-10-30, later)
 
