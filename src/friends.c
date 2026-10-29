@@ -7,6 +7,7 @@
  * callbacks. Slots and ABI: docs/CLIENT_LAYOUTS.md, "Friends research".
  */
 #include "friends.h"
+#include <stdio.h>
 #include <string.h>
 
 #define SH_FRIENDS_FEED_MS 3000
@@ -48,11 +49,12 @@ static bool disabled(void)
 }
 
 void sh_friends_init(struct sh_friends *f, HMODULE module, void *engine, int32_t user, int32_t pipe,
-                     uint32_t appid, const struct dock_client_layout *layout, const struct sh_observer *o)
+                     uint64_t self, uint32_t appid, const struct dock_client_layout *layout, const struct sh_observer *o)
 {
     memset(f, 0, sizeof *f);
     f->o = o;
     f->appid = appid;
+    f->self = self;
     f->last_count = f->last_total = f->last_valid = f->last_named = f->last_playing = f->last_online = -1;
     f->started_ms = o->now_ms();
     DeleteFileW(feed_path);
@@ -208,7 +210,18 @@ static int32_t run_command(struct sh_friends *f, const struct sh_friend_command 
     if (!friend_known(f, c->steamid)) return SH_FRIEND_UNKNOWN;
     if (c->op == SH_FRIEND_INVITE) {
         if (!game_running) return SH_FRIEND_NOT_JOINABLE;
-        return ((invite_fn)SLOT(f, 215))(f->friends, f->appid, c->steamid, "") ? SH_FRIEND_DONE : SH_FRIEND_CALL_FAILED;
+        /* The invite carries this player's own join details: the game's rich
+         * presence "connect", else its lobby, else nothing (a plain invite). */
+        char connect[SH_FRIEND_CONNECT_CAP] = "";
+        int32_t kind = 0;
+        struct game_info own = {0};
+        if (friend_connect(f, f->self, connect)) kind = 1;
+        else if (((game_fn)SLOT(f, 23))(f->friends, f->self, &own) && own.lobby) {
+            snprintf(connect, sizeof connect, "+connect_lobby %llu", (unsigned long long)own.lobby);
+            kind = 2;
+        }
+        f->o->event("friends-invite-connect", kind);
+        return ((invite_fn)SLOT(f, 215))(f->friends, f->appid, c->steamid, connect) ? SH_FRIEND_DONE : SH_FRIEND_CALL_FAILED;
     }
     struct game_info game = {0};
     if (!((game_fn)SLOT(f, 23))(f->friends, c->steamid, &game) || game_app(&game) != f->appid)
@@ -262,6 +275,15 @@ void sh_friends_poll(struct sh_friends *f, bool game_running)
     write_feed(f);
 }
 
+void sh_friends_callback(struct sh_friends *f, int32_t id)
+{
+    if (!f->friends) return;
+    for (unsigned i = 0; i < f->callback_count; ++i) if (f->callback_ids[i] == id) return;
+    if (f->callback_count >= sizeof f->callback_ids / sizeof f->callback_ids[0]) return;
+    f->callback_ids[f->callback_count++] = id;
+    f->o->event("friends-callback-id", id);
+}
+
 void sh_friends_end(struct sh_friends *f)
 {
     (void)f;
@@ -271,13 +293,14 @@ void sh_friends_end(struct sh_friends *f)
 }
 #else
 void sh_friends_init(struct sh_friends *f, HMODULE module, void *engine, int32_t user, int32_t pipe,
-                     uint32_t appid, const struct dock_client_layout *layout, const struct sh_observer *o)
+                     uint64_t self, uint32_t appid, const struct dock_client_layout *layout, const struct sh_observer *o)
 {
-    (void)module; (void)engine; (void)user; (void)pipe; (void)appid; (void)layout;
+    (void)module; (void)engine; (void)user; (void)pipe; (void)self; (void)appid; (void)layout;
     memset(f, 0, sizeof *f);
     f->o = o;
     o->event("friends-available", 0);
 }
 void sh_friends_poll(struct sh_friends *f, bool game_running) { (void)f; (void)game_running; }
+void sh_friends_callback(struct sh_friends *f, int32_t id) { (void)f; (void)id; }
 void sh_friends_end(struct sh_friends *f) { (void)f; }
 #endif

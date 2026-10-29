@@ -268,7 +268,7 @@ int sh_launch(HMODULE module, void *engine, void *client_user,
     uint64_t call = ((launch_fn)(*(void ***)manager)[2])(manager, &gameid, launch_option, 0, user_arguments);
     o->event("launch-request-submitted", call != 0);
     if (!call) { result = 43; goto done; }
-    sh_friends_init(&friends, module, engine, user, pipe, appid, layout, o);
+    sh_friends_init(&friends, module, engine, user, pipe, steamid, appid, layout, o);
     friends_started = true;
     uint64_t begin = o->now_ms(), stopped_at = 0;
     bool seen_running = false, result_received = false, result_rejected = false;
@@ -307,6 +307,7 @@ int sh_launch(HMODULE module, void *engine, void *client_user,
             struct sh_callback cb = {0};
             if (!api->get_callback(pipe, &cb)) break;
             bool valid = cb.id > 0 && cb.size >= 0 && (!cb.size || cb.data);
+            if (valid && friends_started) sh_friends_callback(&friends, cb.id);
             if (valid && cb.id == 703 && cb.size >= 16) {
                 uint64_t finished; int32_t kind; uint32_t size;
                 memcpy(&finished, cb.data, 8);

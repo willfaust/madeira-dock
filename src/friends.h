@@ -18,14 +18,19 @@ struct sh_friends {
     uint32_t appid, last_sequence;
     uint64_t next_command_ms, next_feed_ms;
     int32_t last_count, last_total, last_valid, last_named, last_playing, last_online;
-    uint64_t started_ms, announce_ms, next_request_ms;
+    uint64_t started_ms, announce_ms, next_request_ms, self;
+    int32_t callback_ids[48];
+    unsigned callback_count;
     int32_t announce_state;
 };
 
 void sh_friends_init(struct sh_friends *f, HMODULE module, void *engine, int32_t user, int32_t pipe,
-                     uint32_t appid, const struct dock_client_layout *layout, const struct sh_observer *o);
+                     uint64_t self, uint32_t appid, const struct dock_client_layout *layout, const struct sh_observer *o);
 /* Rate-limited; call from the launch loop. Invites need the game running. */
 void sh_friends_poll(struct sh_friends *f, bool game_running);
+/* Records each distinct callback ID seen on the pipe (numbers only), to
+ * show which notifications reach this session. */
+void sh_friends_callback(struct sh_friends *f, int32_t id);
 /* Removes the feed so the app never reads a stale list. */
 void sh_friends_end(struct sh_friends *f);
 #endif
