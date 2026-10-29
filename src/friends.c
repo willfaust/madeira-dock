@@ -76,16 +76,18 @@ void sh_friends_init(struct sh_friends *f, HMODULE module, void *engine, int32_t
     f->layout = layout;
     o->event("friends-available", 1);
     /* Steam sends friends' status only to a session that is online in
-     * Friends; desktop Steam sets that after sign-in. An offline persona is
-     * set to Online (1) unless MADEIRA_DOCK_FRIENDS_ONLINE=0. A state the
-     * user chose (Away, Invisible, ...) is left alone. */
+     * Friends; desktop Steam announces that after sign-in. The stored state
+     * (1 Online on a fresh session) is announced again so the servers push
+     * friends' status; Offline becomes Online. A state the user chose (Away,
+     * Invisible, ...) is announced as it is. MADEIRA_DOCK_FRIENDS_ONLINE=0
+     * announces nothing. */
     int32_t own = ((own_state_fn)SLOT(f, 4))(friends);
     o->event("friends-own-state", own);
     wchar_t online[4] = {0};
     bool keep = GetEnvironmentVariableW(L"MADEIRA_DOCK_FRIENDS_ONLINE", online, 4) == 1 && online[0] == L'0';
-    if (own == 0 && !keep) {
-        ((set_state_fn)SLOT(f, 5))(friends, 1);
-        o->event("friends-set-online", 1);
+    if (!keep) {
+        ((set_state_fn)SLOT(f, 5))(friends, own > 0 ? own : 1);
+        o->event("friends-set-online", own > 0 ? own : 1);
     }
 }
 
