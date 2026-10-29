@@ -52,7 +52,8 @@ void sh_friends_init(struct sh_friends *f, HMODULE module, void *engine, int32_t
     memset(f, 0, sizeof *f);
     f->o = o;
     f->appid = appid;
-    f->last_count = f->last_total = f->last_valid = -1;
+    f->last_count = f->last_total = f->last_valid = f->last_named = f->last_playing = -1;
+    f->started_ms = o->now_ms();
     DeleteFileW(feed_path);
     DeleteFileW(command_path);
     uintptr_t base = (uintptr_t)module;
@@ -120,11 +121,17 @@ static void write_feed(struct sh_friends *f)
     static uint8_t feed[SH_FRIENDS_FEED_CAP];
     int32_t total = ((count_fn)SLOT(f, 7))(f->friends, SH_FRIEND_FLAG_IMMEDIATE);
     uint32_t count = 0;
-    int32_t valid = 0;
+    int32_t valid = 0, named = 0, playing = 0;
     for (int32_t i = 0; i < total && i < 2000 && count < SH_FRIENDS_MAX; ++i) {
         uint64_t id = 0;
         ((by_index_fn)SLOT(f, 10))(f->friends, &id, i, SH_FRIEND_FLAG_IMMEDIATE);
-        if (sh_friend_steamid_valid(id)) ++valid;
+        if (sh_friend_steamid_valid(id)) {
+            ++valid;
+            const char *name = ((name_fn)SLOT(f, 14))(f->friends, id);
+            struct game_info probe = {0};
+            if (name && name[0]) ++named;
+            if (((game_fn)SLOT(f, 23))(f->friends, id, &probe) && probe.game) ++playing;
+        }
         int32_t state = sh_friend_steamid_valid(id) ? ((state_fn)SLOT(f, 13))(f->friends, id) : 0;
         if (state <= 0) continue;                   /* offline friends are left out */
         struct sh_friend *entry = &list[count++];
@@ -146,8 +153,15 @@ static void write_feed(struct sh_friends *f)
     /* Counts only, to tell an empty list from a failing step. */
     if (total != f->last_total) f->o->event("friends-total", total);
     if (valid != f->last_valid) f->o->event("friends-valid-ids", valid);
+    if (named != f->last_named || playing != f->last_playing || (int32_t)count != f->last_count) {
+        f->o->event("friends-named", named);
+        f->o->event("friends-playing", playing);
+        f->o->event("friends-seconds", (int32_t)((f->o->now_ms() - f->started_ms) / 1000));
+    }
     f->last_total = total;
     f->last_valid = valid;
+    f->last_named = named;
+    f->last_playing = playing;
     size_t size = sh_friends_feed_encode(feed, sizeof feed, list, count);
     HANDLE file = size ? CreateFileW(feed_temp, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, NULL) : INVALID_HANDLE_VALUE;
     if (file == INVALID_HANDLE_VALUE) return;
