@@ -462,3 +462,24 @@ start after 500 ms by default; MADEIRA_DOCK_LICENCE_WAIT_MS accepts 0..30000.
 The existing strict integer parser rejects signs, spaces and overflow. Positive
 ownership from Valve remains required. Native sanitizer checks pass; this
 combined change has not been tested with a live client or a device.
+
+## Friends, invites and join (2026-10-29)
+
+New optional `src/friends.c` (Windows) and `src/friends_format.c` (portable,
+tested in `tests/test-friends_format.c`). After LaunchApp is submitted the host
+gets IClientFriends through CSteamClient slot 13, checks nine pinned friends
+slots, and in the launch loop writes `C:\madeira-friends.bin` every 3 s and
+reads `C:\madeira-friends-cmd.bin` every 0.5 s. Feed and commands are
+deleted at host start and exit. September layout has zero friends pins:
+`friends-available=0`, launch unchanged. `tools/check-client-layout.py` now
+also checks the friends slots, names and IPC IDs (passes on the January DLL
+from Valve's CDN). Cross-compile (x86-64, i686) and native ASan/UBSan tests
+pass.
+
+Not yet proven at runtime: friend list contents, GetFriendByIndex hidden
+return, the lobby/friend argument order of NotifyLobbyJoinRequested (taken
+from the reference and the public callback; the server passes both through
+in order), and whether games react to the join notifications. Invites carry
+an empty connect string. Not done: the app side (Madeira reads nothing yet),
+join at launch (`MADEIRA_STEAM_HOST_ARGUMENTS` with `+connect_lobby`),
+incoming invites. Needs a live client and a second account to verify.

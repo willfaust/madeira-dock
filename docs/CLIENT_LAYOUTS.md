@@ -125,3 +125,75 @@ signed-negative cleanup test: slots 5 and 214 take only `this` and read back a
 and reads back a 4-byte result. Neighbouring slots 216
 `ValidateOfflineLogonTicket` and 217 `BGetOfflineLogonTicket` are not called:
 Dock never handles the ticket itself.
+
+## Friends research (Phase 0, static only; nothing is called yet)
+
+Inspected 2026-10-29 on the January build only. The CDN still serves manifest
+version 1769731672 and the same `bins_win32` archive (SHA-256 matches the
+manifest); its steamclient64.dll has the pinned January fingerprint, and
+`tools/check-client-layout.py` passes on it. The September DLL is no longer
+served, so **friends support is planned for the January adapter only**; on
+September (or any other build) the friends feature reports unavailable and
+the launch proceeds as before.
+
+Accessor: CSteamClient slot **13** (`0x943510`). Its instructions are
+identical to slot 8 (GetIClientUser, pinned) except the field it returns:
+`ClientInterfaces_t+0x20` instead of `+0x18`. The constructor caller at
+`0x9ed414` stores the object built at `0x728730`, which installs vtable
+`IClientFriendsMap` (RVA `0x12bbed8`), into `+0x20`; the same caller stores
+the IClientUserMap object into `+0x18` (`0x9ed5fc`), cross-checking slot 8.
+
+IClientFriendsMap slots, each named by its wrapper's RIP-relative LEA:
+
+| Slot | RVA | Method |
+| ---: | --- | --- |
+| 7 | 0x752d60 | GetFriendCount |
+| 10 | 0x7526f0 | GetFriendByIndex |
+| 12 | 0x754910 | GetFriendRelationship |
+| 13 | 0x7542b0 | GetFriendPersonaState |
+| 14 | 0x753c20 | GetFriendPersonaName |
+| 23 | 0x753250 | GetFriendGamePlayed (IPC 0xe0ce182e) |
+| 25 | 0x753580 | GetFriendGameServer |
+| 93 | 0x754aa0 | GetFriendRichPresence |
+| 96 | 0x82b830 | RequestFriendRichPresence |
+| 194 | 0x81f0a0 | NotifyLobbyJoinRequested (IPC 0x0e74cb2a) |
+| 195 | 0x81f4f0 | NotifyRichPresenceJoinRequested |
+| 215 | 0x812f10 | InviteUserToGame (IPC 0x481f046d) |
+
+Not to be called: 188/190 ActivateGameOverlayInviteDialog* (overlay UI).
+
+Full wrapper review (Phase 1; each serializes the pipe, the function ID, its
+arguments, then a fencepost, and checks response byte 11):
+
+| Slot | Arguments after `this` | Returns |
+| ---: | --- | --- |
+| 7 | int32 flags | int32 |
+| 10 | hidden `uint64 *` result (rdx), int32 index, int32 flags | CSteamID through rdx |
+| 13 | uint64 SteamID | int32 |
+| 14 | uint64 SteamID | string (copied at once) |
+| 23 | uint64 SteamID, `FriendGameInfo_t *` | bool, then 24 bytes into the pointer |
+| 93 | uint32 AppID, uint64 SteamID, string key | string or NULL |
+| 215 | uint32 AppID, uint64 SteamID, string connect | bool |
+| 194 | uint32 AppID, uint64, uint64 | bool |
+| 195 | uint32 AppID, uint64 SteamID, string connect | bool |
+
+Slot 194's two IDs are serialized and forwarded by the server dispatcher
+(`0x798d29`) in the same order; Dock passes lobby then friend, following the
+reference and `GameLobbyJoinRequested_t`. Confirm on a live client.
+
+Earlier entry-register notes (first instructions only): GetFriendGamePlayed takes rdx (8-byte SteamID) and r8 (out pointer);
+InviteUserToGame takes edx (4 bytes), r8 and r9; NotifyLobbyJoinRequested
+takes edx (4 bytes, AppID), r8 and r9 (lobby and friend SteamIDs). Phase 1
+must finish the ABI review for every called slot (argument widths, output
+struct sizes, response bytes) the way ml1990 did, and extend the checker.
+
+Consequences for the plan:
+- Joining a running game: NotifyLobbyJoinRequested / NotifyRichPresenceJoin
+  Requested are the client's own path for an accepted invite (they post the
+  game's GameLobbyJoinRequested / GameRichPresenceJoinRequested), so no game
+  restart is needed for games that listen to those callbacks.
+- Joining at start: the host already passes MADEIRA_STEAM_HOST_ARGUMENTS to
+  LaunchApp's pszUserArgs (bounded), so `+connect_lobby <id>` needs no new
+  launch path. Untested live.
+- Host lifetime: the launch loop polls callbacks every 50 ms until 3 s after
+  the game exits, so the friends feed and commands can run in that loop.

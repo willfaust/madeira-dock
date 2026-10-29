@@ -286,6 +286,34 @@ python3 tools/check-privacy.py [--history|--self-test]
 Never commit tokens, passwords, Steam login caches, account names, real SteamIDs, personal paths,
 logs, Valve binaries, games or build output.
 
+## Friends
+
+While a launched game runs, Dock can list the account's online friends and
+pass Join or Invite requests to Valve's client, so a player without Steam's
+overlay can still play with friends. It only calls the client's own friends
+methods, pinned per build like every other method (currently the January
+build only; other builds report `friends-available=0` and launch as before).
+`MADEIRA_DOCK_FRIENDS=0` turns it off.
+
+- **List:** every 3 seconds, `C:\madeira-friends.bin` (magic `MFRND001`) is
+  replaced atomically. It holds at most 250 online friends: SteamID, persona
+  state, the App ID they play, flags (in game, same app, joinable) and a name
+  of at most 63 bytes of valid UTF-8 without control characters. Lobby IDs,
+  server addresses and connect strings are not exported.
+- **Commands:** the app writes `C:\madeira-friends-cmd.bin` (magic
+  `MFCMD001`, exactly 21 bytes: operation, SteamID, sequence). Dock reads and
+  deletes it, checks that the SteamID is an individual account on the
+  friends list, and reports `friends-cmd-seq` and `friends-cmd-result`
+  (1 done, 2 not joinable, 3 not a friend, 4 the client refused, 5 malformed,
+  6 unavailable).
+- **Join** asks the client to deliver the friend's lobby (or their rich
+  presence `connect` value, printable ASCII, at most 255 bytes) to the running
+  game through `NotifyLobbyJoinRequested` / `NotifyRichPresenceJoinRequested`,
+  the path the overlay uses when an invite is accepted. The game decides
+  whether to join. **Invite** calls `InviteUserToGame` while the game runs.
+- SteamIDs and names go only to the feed file; the report and logs carry
+  counts and result codes.
+
 ## Repository layout
 
 | Path | Contents |
@@ -295,6 +323,7 @@ logs, Valve binaries, games or build output.
 | `src/launch.c` | Install-folder check, CEG request, discovery values, `LaunchApp`, the game-running loop. |
 | `src/auth.c` | The one-use sign-in transfer: parse, consume, clear. |
 | `src/client_layout.c` | The supported client builds and their method addresses. |
+| `src/friends.c`, `src/friends_format.c` | Friends list feed and Join/Invite commands; the bounded file formats. |
 | `src/scm.c` | Wine's service manager and Valve's service installer. |
 | `src/probe.c`, `src/validation.c` | The bootstrap test and the pure decision functions the tests cover. |
 | `tests/`, `tools/` | Unit tests; build, check, privacy and layout scripts. |
