@@ -27,6 +27,8 @@ _Static_assert(sizeof(struct game_info) == 24, "FriendGameInfo_t");
 
 typedef void *(__thiscall *get_friends_fn)(void *, int32_t, int32_t);
 typedef int32_t (__thiscall *count_fn)(void *, int32_t);
+typedef int32_t (__thiscall *own_state_fn)(void *);
+typedef void (__thiscall *set_state_fn)(void *, int32_t);
 typedef void *(__thiscall *by_index_fn)(void *, uint64_t *, int32_t, int32_t);
 typedef int32_t (__thiscall *state_fn)(void *, uint64_t);
 typedef const char *(__thiscall *name_fn)(void *, uint64_t);
@@ -62,7 +64,8 @@ void sh_friends_init(struct sh_friends *f, HMODULE module, void *engine, int32_t
     const struct { unsigned slot; uintptr_t rva; } methods[] = {
         {7, layout->friend_count}, {10, layout->friend_by_index}, {13, layout->friend_state},
         {14, layout->friend_name}, {23, layout->friend_game}, {93, layout->friend_presence},
-        {215, layout->friend_invite}, {194, layout->friend_join_lobby}, {195, layout->friend_join_presence}};
+        {215, layout->friend_invite}, {194, layout->friend_join_lobby}, {195, layout->friend_join_presence},
+        {4, layout->persona_state}, {5, layout->set_persona_state}};
     for (unsigned i = 0; i < sizeof methods / sizeof methods[0]; ++i)
         if (!dock_method_is(base, friends, methods[i].slot, methods[i].rva)) {
             o->event("friends-available", 0);
@@ -71,6 +74,18 @@ void sh_friends_init(struct sh_friends *f, HMODULE module, void *engine, int32_t
     f->friends = friends;
     f->layout = layout;
     o->event("friends-available", 1);
+    /* Steam sends friends' status only to a session that is online in
+     * Friends; desktop Steam sets that after sign-in. An offline persona is
+     * set to Online (1) unless MADEIRA_DOCK_FRIENDS_ONLINE=0. A state the
+     * user chose (Away, Invisible, ...) is left alone. */
+    int32_t own = ((own_state_fn)SLOT(f, 4))(friends);
+    o->event("friends-own-state", own);
+    wchar_t online[4] = {0};
+    bool keep = GetEnvironmentVariableW(L"MADEIRA_DOCK_FRIENDS_ONLINE", online, 4) == 1 && online[0] == L'0';
+    if (own == 0 && !keep) {
+        ((set_state_fn)SLOT(f, 5))(friends, 1);
+        o->event("friends-set-online", 1);
+    }
 }
 
 static uint32_t game_app(const struct game_info *game)
