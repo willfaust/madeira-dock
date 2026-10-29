@@ -124,6 +124,22 @@ static bool friend_connect(struct sh_friends *f, uint64_t id, char *out)
     return true;
 }
 
+/* The lobby this friend invited this player to, or 0. */
+static uint64_t invited_lobby(const struct sh_friends *f, uint64_t from)
+{
+    for (unsigned i = 0; i < f->invite_count; ++i) if (f->invites[i].from == from) return f->invites[i].lobby;
+    return 0;
+}
+
+static void forget_invite(struct sh_friends *f, uint64_t from)
+{
+    for (unsigned i = 0; i < f->invite_count; ++i)
+        if (f->invites[i].from == from) {
+            f->invites[i] = f->invites[--f->invite_count];
+            return;
+        }
+}
+
 static bool friend_known(struct sh_friends *f, uint64_t id)
 {
     int32_t count = ((count_fn)SLOT(f, 7))(f->friends, SH_FRIEND_FLAG_IMMEDIATE);
@@ -162,6 +178,7 @@ static void write_feed(struct sh_friends *f)
         entry->steamid = id;
         entry->state = (uint32_t)state;
         sh_friend_name_copy(entry->name, sizeof entry->name, ((name_fn)SLOT(f, 14))(f->friends, id));
+        if (invited_lobby(f, id)) entry->flags |= SH_FRIEND_INVITED;
         struct game_info game = {0};
         if (((game_fn)SLOT(f, 23))(f->friends, id, &game) && game.game) {
             entry->flags |= SH_FRIEND_IN_GAME;
@@ -250,6 +267,13 @@ static int32_t run_command(struct sh_friends *f, const struct sh_friend_command 
         f->o->event("friends-invite-connect", kind);
         return ((invite_fn)SLOT(f, 215))(f->friends, f->appid, c->steamid, connect) ? SH_FRIEND_DONE : SH_FRIEND_CALL_FAILED;
     }
+    /* An invite from this friend names the lobby to join. */
+    uint64_t invited = invited_lobby(f, c->steamid);
+    if (invited) {
+        forget_invite(f, c->steamid);
+        return ((join_lobby_fn)SLOT(f, 194))(f->friends, f->appid, invited, c->steamid)
+            ? SH_FRIEND_DONE : SH_FRIEND_CALL_FAILED;
+    }
     struct game_info game = {0};
     if (!((game_fn)SLOT(f, 23))(f->friends, c->steamid, &game) || game_app(&game) != f->appid)
         return SH_FRIEND_NOT_JOINABLE;
@@ -311,6 +335,29 @@ void sh_friends_callback(struct sh_friends *f, int32_t id, const void *data, int
     /* PersonaStateChange_t {uint64 SteamID; int32 flags}: which kinds of
      * change (1 name, 2 status, 4 came online, 8 went offline, 16 game, ...)
      * reach this session. Counts and flag bits only. */
+    /* LobbyInvite_t {inviter, lobby, CGameID}: a friend invited this player
+     * to a lobby. Kept for this app only (the newest per friend); Join on
+     * that friend joins it. */
+    if (id == 503 && size >= 24) {
+        uint64_t from, lobby, game;
+        memcpy(&from, data, 8);
+        memcpy(&lobby, (const uint8_t *)data + 8, 8);
+        memcpy(&game, (const uint8_t *)data + 16, 8);
+        struct game_info info = {.game = game};
+        bool ours = game_app(&info) == f->appid && lobby && sh_friend_steamid_valid(from);
+        f->o->event("friends-invite-received", ours ? 1 : 0);
+        if (ours) {
+            forget_invite(f, from);
+            if (f->invite_count == sizeof f->invites / sizeof f->invites[0]) {
+                memmove(f->invites, f->invites + 1, sizeof f->invites - sizeof f->invites[0]);
+                --f->invite_count;
+            }
+            f->invites[f->invite_count].from = from;
+            f->invites[f->invite_count].lobby = lobby;
+            ++f->invite_count;
+            f->next_feed_ms = 0;   /* show it at the next poll */
+        }
+    }
     if (id == 304 && size >= 12) {
         uint64_t who;
         int32_t flags;

@@ -70,7 +70,7 @@ size_t sh_friends_feed_encode(uint8_t *out, size_t cap, const struct sh_friend *
         put64(out + at, f->steamid);
         put32(out + at + 8, f->state);
         put32(out + at + 12, f->appid);
-        out[at + 16] = f->flags & (SH_FRIEND_IN_GAME | SH_FRIEND_SAME_APP | SH_FRIEND_JOINABLE);
+        out[at + 16] = f->flags & (SH_FRIEND_IN_GAME | SH_FRIEND_SAME_APP | SH_FRIEND_JOINABLE | SH_FRIEND_INVITED);
         out[at + 17] = (uint8_t)name;
         memcpy(out + at + 18, f->name, name);
         at += 18 + name;

@@ -526,12 +526,22 @@ once-a-minute ClientRequestFriendData for every friend reset all friends to
 offline (the update carried the went-offline bit). The window sends that
 request only for friends whose name is not loaded; Dock now does the same
 (normally none). The earlier "online" sightings were status changes that
-happened to arrive. Callback 503 (LobbyInvite_t) was seen once on Dock's
-pipe: incoming lobby invites may be readable without the shared-connection
-receive path; not yet examined.
+happened to arrive. Callback 503 (LobbyInvite_t) arrives on Dock's pipe once
+the session is signed in to Friends, so incoming lobby invites need no
+shared-connection receive path (see below).
 
 Madeira: the in-game Session menu has a Friends page (DockFriends.swift):
 friends sorted joinable / this game / other game / online / offline, Join for
 joinable friends, Invite for online friends, the result per row. On the iPad,
 with a friend's Steam under Sikarugir: the friend showed online, Join entered
 the friend's lobby and Invite brought the friend into this lobby.
+
+## Incoming invites (2026-10-30)
+
+Dock keeps each LobbyInvite_t (503: inviter, lobby, CGameID) for the session's
+App ID, newest per friend, at most 16, and sets feed flag 8 (invited) on the
+inviter; Join on that friend calls NotifyLobbyJoinRequested with the invited
+lobby and forgets the invite. The Friends page lists inviters first with
+"Invited you to play" and Accept. On the iPad the friend's invite appeared and
+Accept joined the friend's lobby. Invites from game invites with a connect
+string (GameRichPresenceJoinRequested, chat messages) are not handled.

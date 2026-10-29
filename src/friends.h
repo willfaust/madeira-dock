@@ -26,6 +26,9 @@ struct sh_friends {
     uint32_t connection;   /* its allocated connection */
     int32_t persona_flags; /* PersonaStateChange_t flags seen, OR-ed */
     int32_t persona_updates;
+    /* Lobby invites received for this app (LobbyInvite_t), newest kept. */
+    struct { uint64_t from, lobby; } invites[16];
+    unsigned invite_count;
 };
 
 void sh_friends_init(struct sh_friends *f, HMODULE module, void *engine, int32_t user, int32_t pipe,

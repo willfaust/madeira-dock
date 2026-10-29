@@ -20,7 +20,8 @@
 enum sh_friend_flag {
     SH_FRIEND_IN_GAME = 1,      /* playing any game */
     SH_FRIEND_SAME_APP = 2,     /* playing this session's App ID */
-    SH_FRIEND_JOINABLE = 4      /* same app with a lobby or a connect string */
+    SH_FRIEND_JOINABLE = 4,     /* same app with a lobby or a connect string */
+    SH_FRIEND_INVITED = 8       /* invited this player to a lobby of this app */
 };
 
 enum sh_friend_op { SH_FRIEND_INVITE = 1, SH_FRIEND_JOIN = 2 };

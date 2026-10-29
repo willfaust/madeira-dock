@@ -312,7 +312,8 @@ build only; other builds report `friends-available=0` and launch as before).
 
 - **List:** every 3 seconds, `C:\madeira-friends.bin` (magic `MFRND001`) is
   replaced atomically. It holds at most 250 friends (online or not): SteamID, persona
-  state, the App ID they play, flags (in game, same app, joinable) and a name
+  state, the App ID they play, flags (in game, same app, joinable, invited
+  this player) and a name
   of at most 63 bytes of valid UTF-8 without control characters. Lobby IDs,
   server addresses and connect strings are not exported.
 - **Commands:** the app writes `C:\madeira-friends-cmd.bin` (magic
@@ -334,6 +335,10 @@ build only; other builds report `friends-available=0` and launch as before).
   `friends-invite-connect` reports which (3 lobby invite, 1 connect, 2
   connect_lobby, 0 plain) and `friends-own-game` what the client knows of
   the account's own game (0 nothing ... 4 this app with a lobby).
+- **Incoming invites:** a lobby invite from a friend (`LobbyInvite_t`) for
+  this game is kept (the newest per friend, at most 16) and flags that friend
+  as having invited this player; Join on that friend joins the invited lobby.
+  Reported as `friends-invite-received` (1 kept, 0 another game's).
 - SteamIDs and names go only to the feed file; the report and logs carry
   counts and result codes.
 
