@@ -313,7 +313,7 @@ build only; other builds report `friends-available=0` and launch as before).
 - **List:** every 3 seconds, `C:\madeira-friends.bin` (magic `MFRND001`) is
   replaced atomically. It holds at most 250 friends (online or not): SteamID, persona
   state, the App ID they play, flags (in game, same app, joinable, invited
-  this player; a friend who appears offline, invisible included, shows no
+  this player, can invite; a friend who appears offline, invisible included, shows no
   game, as in desktop Steam) and a name
   of at most 63 bytes of valid UTF-8 without control characters. Lobby IDs,
   server addresses and connect strings are not exported.
@@ -322,20 +322,31 @@ build only; other builds report `friends-available=0` and launch as before).
   deletes it, checks that the SteamID is an individual account on the
   friends list, and reports `friends-cmd-seq` and `friends-cmd-result`
   (1 done, 2 not joinable, 3 not a friend, 4 the client refused, 5 malformed,
-  6 unavailable).
+  6 unavailable). Operation 3 changes the account's status: the id field
+  carries 1 Online, 3 Away or 7 Invisible (nothing else is accepted) and Dock
+  sends it through the client's shared connection.
+- **Status:** the app starts the session with `MADEIRA_DOCK_PERSONA_STATE`
+  (0 Offline, 1 Online, 3 Away, 7 Invisible). Offline turns the whole feature
+  off for that session, so it cannot be changed from inside the game; the other
+  three can be changed with operation 3.
 - **Join** asks the client to deliver the friend's lobby (or their rich
   presence `connect` value, printable ASCII, at most 255 bytes) to the running
   game through `NotifyLobbyJoinRequested` / `NotifyRichPresenceJoinRequested`,
   the path the overlay uses when an invite is accepted. The game decides
-  whether to join. **Invite** works while the game runs. When the account is
-  in a lobby of this game, Dock sends the lobby invite that the friends
-  menu's "Invite to lobby" sends (`ClientMMSInviteToLobby`, through the shared
-  connection); the friend's game joins through its lobby join callback.
-  Otherwise it calls `InviteUserToGame` with the game's rich presence
-  `connect`, else `+connect_lobby <lobby>`, else nothing.
+  whether to join. **Invite** works while the game runs and the account has something to
+  join, as in desktop Steam. In a lobby of this game, Dock sends the lobby
+  invite that the friends menu's "Invite to lobby" sends
+  (`ClientMMSInviteToLobby`, through the shared connection); the friend's game
+  joins through its lobby join callback. Otherwise it calls `InviteUserToGame`
+  with the game's rich presence `connect`, else `+connect_lobby <lobby>`. With
+  neither, no invite is sent (result 2). The feed sets the can-invite flag on
+  every friend while one of these exists, so the app shows Invite only then.
   `friends-invite-connect` reports which (3 lobby invite, 1 connect, 2
-  connect_lobby, 0 plain) and `friends-own-game` what the client knows of
-  the account's own game (0 nothing ... 4 this app with a lobby).
+  connect_lobby, 0 none) and `friends-own-game` what the client knows of the
+  account's own game (0 nothing ... 4 this app with a lobby).
+  **Tested:** only the lobby invite, with one game. The connect-string and
+  `+connect_lobby` paths are untested. How to test each kind:
+  [docs/INVITE_TESTING.md](docs/INVITE_TESTING.md).
 - **Incoming invites:** a lobby invite from a friend (`LobbyInvite_t`) for
   this game is kept (the newest per friend, at most 16) and flags that friend
   as having invited this player; Join on that friend joins the invited lobby.

@@ -59,13 +59,13 @@ int main(void)
 
     struct sh_friend friends[2] = {
         {ID(1), 1, 0, 0, "One"},
-        {ID(2), 1, 480, SH_FRIEND_IN_GAME | SH_FRIEND_SAME_APP | SH_FRIEND_JOINABLE | SH_FRIEND_INVITED | 0x80, "Two"}};
+        {ID(2), 1, 480, SH_FRIEND_IN_GAME | SH_FRIEND_SAME_APP | SH_FRIEND_JOINABLE | SH_FRIEND_INVITED | SH_FRIEND_CAN_INVITE | 0x80, "Two"}};
     static uint8_t feed[SH_FRIENDS_FEED_CAP];
     size_t size = sh_friends_feed_encode(feed, sizeof feed, friends, 2);
     assert(size == 12 + 2 * (18 + 3));
     assert(!memcmp(feed, "MFRND001", 8) && feed[8] == 2 && !feed[9]);
     assert(feed[12] == 1 && feed[12 + 16] == 0 && feed[12 + 17] == 3 && !memcmp(feed + 30, "One", 3));
-    assert(feed[33 + 12] == (480 & 0xff) && feed[33 + 16] == 15);   /* unknown flag bit dropped */
+    assert(feed[33 + 12] == (480 & 0xff) && feed[33 + 16] == 31);   /* unknown flag bit dropped */
     assert(!sh_friends_feed_encode(feed, size - 1, friends, 2));
     assert(!sh_friends_feed_encode(feed, sizeof feed, friends, SH_FRIENDS_MAX + 1));
     assert(sh_friends_feed_encode(feed, sizeof feed, NULL, 0) == 12);
@@ -86,7 +86,11 @@ int main(void)
     assert(sh_friend_command_parse(raw, command(raw, SH_FRIEND_INVITE, ID(7), 4), &parsed));
     assert(!sh_friend_command_parse(raw, size - 1, &parsed));
     assert(!sh_friend_command_parse(raw, size + 1, &parsed));
-    assert(!sh_friend_command_parse(raw, command(raw, 3, ID(7), 3), &parsed));
+    assert(sh_friend_command_parse(raw, command(raw, SH_FRIEND_SET_STATE, 3, 5), &parsed));
+    assert(parsed.op == SH_FRIEND_SET_STATE && parsed.steamid == 3);
+    assert(!sh_friend_command_parse(raw, command(raw, SH_FRIEND_SET_STATE, 0, 5), &parsed));   /* Offline: before launch only */
+    assert(!sh_friend_command_parse(raw, command(raw, SH_FRIEND_SET_STATE, 2, 5), &parsed));
+    assert(!sh_friend_command_parse(raw, command(raw, 4, ID(7), 3), &parsed));
     assert(!sh_friend_command_parse(raw, command(raw, SH_FRIEND_JOIN, ID(7), 0), &parsed));
     assert(!sh_friend_command_parse(raw, command(raw, SH_FRIEND_JOIN, 0x0170000100000007ULL, 3), &parsed));
     command(raw, SH_FRIEND_JOIN, ID(7), 3); raw[0] = 'X';

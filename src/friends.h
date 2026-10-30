@@ -22,6 +22,7 @@ struct sh_friends {
     int32_t callback_ids[48];
     unsigned callback_count;
     int32_t announce_state;
+    bool announce_pending; /* announce_state still to be sent (it may be 0, Offline) */
     void *shared;          /* IClientSharedConnection, or NULL */
     uint32_t connection;   /* its allocated connection */
     int32_t persona_flags; /* PersonaStateChange_t flags seen, OR-ed */

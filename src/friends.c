@@ -47,7 +47,10 @@ typedef bool (__thiscall *send_fn)(void *, uint32_t, const void *, uint32_t);
 static bool disabled(void)
 {
     wchar_t value[4] = {0};
-    return GetEnvironmentVariableW(L"MADEIRA_DOCK_FRIENDS", value, 4) == 1 && value[0] == L'0';
+    if (GetEnvironmentVariableW(L"MADEIRA_DOCK_FRIENDS", value, 4) == 1 && value[0] == L'0') return true;
+    /* The app's Offline choice (MADEIRA_DOCK_PERSONA_STATE=0) turns friends off
+     * entirely: no sign-in to Friends, no subscription, no list, no commands. */
+    return GetEnvironmentVariableW(L"MADEIRA_DOCK_PERSONA_STATE", value, 4) == 1 && value[0] == L'0';
 }
 
 void sh_friends_init(struct sh_friends *f, HMODULE module, void *engine, int32_t user, int32_t pipe,
@@ -104,8 +107,18 @@ void sh_friends_init(struct sh_friends *f, HMODULE module, void *engine, int32_t
     f->connection = ((allocate_fn)SHARED(f, 0))(shared);
     o->event("friends-signin-available", f->connection ? 1 : 2);
     if (!f->connection) { f->shared = NULL; return; }
-    /* The stored state (Online on a fresh session); Offline becomes Online. */
-    f->announce_state = own > 0 ? own : 1;
+    /* The app's choice (MADEIRA_DOCK_PERSONA_STATE: 0 Offline, 1 Online, 3 Away,
+     * 7 Invisible); without one, the stored state (Online on a fresh session),
+     * where Offline becomes Online. */
+    wchar_t chosen[4] = {0};
+    DWORD n = GetEnvironmentVariableW(L"MADEIRA_DOCK_PERSONA_STATE", chosen, 4);
+    if (n == 1 && (chosen[0] == L'0' || chosen[0] == L'1' || chosen[0] == L'3' || chosen[0] == L'7')) {
+        f->announce_state = (int32_t)(chosen[0] - L'0');
+    } else {
+        f->announce_state = own > 0 ? own : 1;
+    }
+    f->announce_pending = true;
+    o->event("friends-persona-chosen", f->announce_state);
     f->announce_ms = o->now_ms() + 2000;
 }
 
@@ -158,6 +171,12 @@ static void write_feed(struct sh_friends *f)
     int32_t total = ((count_fn)SLOT(f, 7))(f->friends, SH_FRIEND_FLAG_IMMEDIATE);
     uint32_t count = 0;
     int32_t valid = 0, named = 0, playing = 0, online = 0;
+    /* Like desktop Steam, Invite is offered only when this player has something
+     * to join: a lobby of this app, or a rich presence "connect" the game set. */
+    struct game_info mine = {0};
+    char mine_connect[SH_FRIEND_CONNECT_CAP];
+    bool in_lobby = ((game_fn)SLOT(f, 23))(f->friends, f->self, &mine) && mine.lobby && game_app(&mine) == f->appid;
+    in_lobby = in_lobby || friend_connect(f, f->self, mine_connect);
     for (int32_t i = 0; i < total && i < 2000 && count < SH_FRIENDS_MAX; ++i) {
         uint64_t id = 0;
         ((by_index_fn)SLOT(f, 10))(f->friends, &id, i, SH_FRIEND_FLAG_IMMEDIATE);
@@ -179,6 +198,7 @@ static void write_feed(struct sh_friends *f)
         entry->state = (uint32_t)state;
         sh_friend_name_copy(entry->name, sizeof entry->name, ((name_fn)SLOT(f, 14))(f->friends, id));
         if (invited_lobby(f, id)) entry->flags |= SH_FRIEND_INVITED;
+        if (in_lobby) entry->flags |= SH_FRIEND_CAN_INVITE;
         /* A friend who appears offline (invisible included) shows no game,
          * as in desktop Steam, though the client may still know one. */
         struct game_info game = {0};
@@ -197,7 +217,7 @@ static void write_feed(struct sh_friends *f)
      * resets their live status to offline; status comes from the
      * Chat.RequestFriendPersonaStates subscription (sh_friends_poll). */
     uint64_t now = f->o->now_ms();
-    if (f->shared && !f->announce_state && valid && now >= f->next_request_ms) {
+    if (f->shared && !f->announce_pending && valid && now >= f->next_request_ms) {
         static uint64_t ids[SH_FRIENDS_MAX];
         static uint8_t message[8 + 14 + SH_FRIENDS_MAX * 9];
         uint32_t n = 0;
@@ -240,11 +260,21 @@ static void write_feed(struct sh_friends *f)
 
 static int32_t run_command(struct sh_friends *f, const struct sh_friend_command *c, bool game_running)
 {
+    if (c->op == SH_FRIEND_SET_STATE) {
+        uint8_t message[64];
+        size_t size = f->shared ? sh_cm_change_status(message, sizeof message, (uint32_t)c->steamid) : 0;
+        bool sent = size && ((send_fn)SHARED(f, 2))(f->shared, f->connection, message, (uint32_t)size);
+        f->o->event("friends-state-set", sent ? (int32_t)c->steamid : -1);
+        return sent ? SH_FRIEND_DONE : SH_FRIEND_CALL_FAILED;
+    }
     if (!friend_known(f, c->steamid)) return SH_FRIEND_UNKNOWN;
     if (c->op == SH_FRIEND_INVITE) {
         if (!game_running) return SH_FRIEND_NOT_JOINABLE;
-        /* The invite carries this player's own join details: the game's rich
-         * presence "connect", else its lobby, else nothing (a plain invite). */
+        /* The invite carries this player's own join details: in a lobby of this
+         * app, the friends menu's "Invite to lobby" (a lobby invite, which games
+         * accept through their lobby join callback); else the game's rich
+         * presence "connect"; else its lobby as +connect_lobby. With none of
+         * these there is nothing to join and no invite is sent. */
         char connect[SH_FRIEND_CONNECT_CAP] = "";
         int32_t kind = 0;
         struct game_info own = {0};
@@ -252,9 +282,8 @@ static int32_t run_command(struct sh_friends *f, const struct sh_friend_command 
          * game, 2 another app, 3 this app without a lobby, 4 with a lobby. */
         bool have = ((game_fn)SLOT(f, 23))(f->friends, f->self, &own);
         f->o->event("friends-own-game", !have ? 0 : !own.game ? 1 : game_app(&own) != f->appid ? 2 : own.lobby ? 4 : 3);
-        /* In a lobby, the friends menu's "Invite to lobby": a lobby invite,
-         * which games accept through their lobby join callback. */
-        if (have && own.lobby && game_app(&own) == f->appid && f->shared) {
+        bool lobby = have && own.lobby && game_app(&own) == f->appid;
+        if (lobby && f->shared) {
             uint8_t message[40];
             size_t size = sh_cm_invite_to_lobby(message, sizeof message, f->appid, own.lobby, c->steamid);
             f->o->event("friends-invite-connect", 3);
@@ -262,11 +291,12 @@ static int32_t run_command(struct sh_friends *f, const struct sh_friend_command 
                 ? SH_FRIEND_DONE : SH_FRIEND_CALL_FAILED;
         }
         if (friend_connect(f, f->self, connect)) kind = 1;
-        else if (have && own.lobby) {
+        else if (lobby) {
             snprintf(connect, sizeof connect, "+connect_lobby %llu", (unsigned long long)own.lobby);
             kind = 2;
         }
         f->o->event("friends-invite-connect", kind);
+        if (!kind) return SH_FRIEND_NOT_JOINABLE;
         return ((invite_fn)SLOT(f, 215))(f->friends, f->appid, c->steamid, connect) ? SH_FRIEND_DONE : SH_FRIEND_CALL_FAILED;
     }
     /* An invite from this friend names the lobby to join. */
@@ -315,7 +345,7 @@ void sh_friends_poll(struct sh_friends *f, bool game_running)
     if (now < f->next_command_ms) return;
     f->next_command_ms = now + SH_FRIENDS_FEED_MS / 6;
     read_command(f, game_running);
-    if (f->shared && f->announce_state && now >= f->announce_ms) {
+    if (f->shared && f->announce_pending && now >= f->announce_ms) {
         uint8_t message[64];
         size_t size = sh_cm_change_status(message, sizeof message, (uint32_t)f->announce_state);
         bool sent = size && ((send_fn)SHARED(f, 2))(f->shared, f->connection, message, (uint32_t)size);
@@ -325,7 +355,7 @@ void sh_friends_poll(struct sh_friends *f, bool game_running)
         size = sh_cm_service_call(message, sizeof message, "Chat.RequestFriendPersonaStates#1");
         sent = size && ((send_fn)SHARED(f, 2))(f->shared, f->connection, message, (uint32_t)size);
         f->o->event("friends-subscribed", sent);
-        f->announce_state = 0;
+        f->announce_pending = false;
     }
     if (!f->friends || now < f->next_feed_ms) return;
     f->next_feed_ms = now + SH_FRIENDS_FEED_MS;

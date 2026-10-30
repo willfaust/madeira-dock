@@ -70,7 +70,7 @@ size_t sh_friends_feed_encode(uint8_t *out, size_t cap, const struct sh_friend *
         put64(out + at, f->steamid);
         put32(out + at + 8, f->state);
         put32(out + at + 12, f->appid);
-        out[at + 16] = f->flags & (SH_FRIEND_IN_GAME | SH_FRIEND_SAME_APP | SH_FRIEND_JOINABLE | SH_FRIEND_INVITED);
+        out[at + 16] = f->flags & (SH_FRIEND_IN_GAME | SH_FRIEND_SAME_APP | SH_FRIEND_JOINABLE | SH_FRIEND_INVITED | SH_FRIEND_CAN_INVITE);
         out[at + 17] = (uint8_t)name;
         memcpy(out + at + 18, f->name, name);
         at += 18 + name;
@@ -86,7 +86,12 @@ bool sh_friend_command_parse(const uint8_t *data, size_t size, struct sh_friend_
     uint32_t sequence = 0;
     for (int i = 7; i >= 0; --i) id = (id << 8) | data[9 + i];
     for (int i = 3; i >= 0; --i) sequence = (sequence << 8) | data[17 + i];
-    if ((op != SH_FRIEND_INVITE && op != SH_FRIEND_JOIN) || !sh_friend_steamid_valid(id) || !sequence) return false;
+    if (!sequence) return false;
+    if (op == SH_FRIEND_SET_STATE) {
+        if (id != 1 && id != 3 && id != 7) return false;
+    } else if ((op != SH_FRIEND_INVITE && op != SH_FRIEND_JOIN) || !sh_friend_steamid_valid(id)) {
+        return false;
+    }
     command->op = op;
     command->steamid = id;
     command->sequence = sequence;

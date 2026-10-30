@@ -21,10 +21,13 @@ enum sh_friend_flag {
     SH_FRIEND_IN_GAME = 1,      /* playing any game */
     SH_FRIEND_SAME_APP = 2,     /* playing this session's App ID */
     SH_FRIEND_JOINABLE = 4,     /* same app with a lobby or a connect string */
-    SH_FRIEND_INVITED = 8       /* invited this player to a lobby of this app */
+    SH_FRIEND_INVITED = 8,      /* invited this player to a lobby of this app */
+    SH_FRIEND_CAN_INVITE = 16   /* this player has a lobby or connect string to invite with */
 };
 
-enum sh_friend_op { SH_FRIEND_INVITE = 1, SH_FRIEND_JOIN = 2 };
+/* SET_STATE carries the new persona state in the id field: 1 Online, 3 Away or
+ * 7 Invisible. Offline is chosen before launch only (it turns friends off). */
+enum sh_friend_op { SH_FRIEND_INVITE = 1, SH_FRIEND_JOIN = 2, SH_FRIEND_SET_STATE = 3 };
 
 /* friends-cmd-result values in the report. */
 enum sh_friend_result {
