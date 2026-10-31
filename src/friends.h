@@ -23,10 +23,16 @@ struct sh_friends {
     unsigned callback_count;
     int32_t announce_state;
     bool announce_pending; /* announce_state still to be sent (it may be 0, Offline) */
+    unsigned announce_tries; /* failed sends of the current announce */
     void *shared;          /* IClientSharedConnection, or NULL */
     uint32_t connection;   /* its allocated connection */
     int32_t persona_flags; /* PersonaStateChange_t flags seen, OR-ed */
     int32_t persona_updates;
+    /* The counts last written to the report, and when they may be written
+     * again: the interval doubles from 15 s to 10 min, so a long session's
+     * report stays small (the app reads at most 1 MB of it). */
+    int32_t logged_count, logged_named, logged_playing, logged_online, logged_requested;
+    uint64_t next_counts_ms, counts_interval_ms;
     /* Lobby invites received for this app (LobbyInvite_t), newest kept. */
     struct { uint64_t from, lobby; } invites[16];
     unsigned invite_count;
