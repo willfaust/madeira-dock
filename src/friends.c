@@ -345,13 +345,15 @@ static void read_command(struct sh_friends *f, bool game_running)
         if (command.sequence == f->last_sequence) return;   /* already answered */
         f->last_sequence = command.sequence;
         f->o->event("friends-cmd-seq", (int32_t)command.sequence);
-        result = f->friends ? run_command(f, &command, game_running) : SH_FRIEND_UNAVAILABLE;
+        result = run_command(f, &command, game_running);
     }
     f->o->event("friends-cmd-result", result);
 }
 
 void sh_friends_poll(struct sh_friends *f, bool game_running)
 {
+    /* Friends off: the app has no Friends page, so nothing to read or send. */
+    if (!f->friends) return;
     uint64_t now = f->o->now_ms();
     if (now < f->next_command_ms) return;
     f->next_command_ms = now + SH_FRIENDS_FEED_MS / 6;
@@ -373,7 +375,7 @@ void sh_friends_poll(struct sh_friends *f, bool game_running)
         if (subscribed || ++f->announce_tries >= 5) f->announce_pending = false;
         else f->announce_ms = now + 5000;
     }
-    if (!f->friends || now < f->next_feed_ms) return;
+    if (now < f->next_feed_ms) return;
     f->next_feed_ms = now + SH_FRIENDS_FEED_MS;
     write_feed(f);
 }
@@ -438,7 +440,8 @@ void sh_friends_callback(struct sh_friends *f, int32_t id, const void *data, int
 
 void sh_friends_end(struct sh_friends *f)
 {
-    (void)f;
+    /* Friends off: init removed these and nothing has written them since. */
+    if (!f->friends) return;
     DeleteFileW(feed_path);
     DeleteFileW(feed_temp);
     DeleteFileW(command_path);

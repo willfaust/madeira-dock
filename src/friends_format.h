@@ -35,8 +35,7 @@ enum sh_friend_result {
     SH_FRIEND_NOT_JOINABLE = 2,
     SH_FRIEND_UNKNOWN = 3,
     SH_FRIEND_CALL_FAILED = 4,
-    SH_FRIEND_BAD_COMMAND = 5,
-    SH_FRIEND_UNAVAILABLE = 6
+    SH_FRIEND_BAD_COMMAND = 5
 };
 
 struct sh_friend {

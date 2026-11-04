@@ -348,8 +348,8 @@ build only; other builds report `friends-available=0` and launch as before).
   `MFCMD001`, exactly 21 bytes: operation, SteamID, sequence). Dock reads and
   deletes it, checks that the SteamID is an individual account on the
   friends list, and reports `friends-cmd-seq` and `friends-cmd-result`
-  (1 done, 2 not joinable, 3 not a friend, 4 the client refused, 5 malformed,
-  6 unavailable). Operation 3 changes the account's status: the id field
+  (1 done, 2 not joinable, 3 not a friend, 4 the client refused, 5 malformed).
+  With friends off, Dock does not read commands. Operation 3 changes the account's status: the id field
   carries 1 Online, 3 Away or 7 Invisible (nothing else is accepted) and Dock
   sends it through the client's shared connection.
 - **Status:** the app starts the session with `MADEIRA_DOCK_PERSONA_STATE`

@@ -600,3 +600,11 @@ and results clear after 5 s. Dock's report uses CRLF; the app splits on any
 newline. Accepting an invite to a lobby the friend has left put the player in
 the friend's new lobby: Dock passes the invited lobby and the friend, so the
 game or the client followed the friend.
+
+## Friends off: no polling (2026-11-05)
+
+With friends off (`MADEIRA_DOCK_PERSONA_STATE=0`, `MADEIRA_DOCK_FRIENDS=0`, or a
+client build without the pins), `sh_friends_poll` and `sh_friends_end` return
+at once, so Dock no longer opens the command file every 500 ms or answers
+`friends-cmd-result=6`. `sh_friends_init` still removes files left by an
+earlier session. Not device-tested.
