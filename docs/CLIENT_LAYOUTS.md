@@ -126,13 +126,14 @@ and reads back a 4-byte result. Neighbouring slots 216
 `ValidateOfflineLogonTicket` and 217 `BGetOfflineLogonTicket` are not called:
 Dock never handles the ticket itself.
 
-## Friends research (Phase 0, static only; nothing is called yet)
+## Friends research (January build)
 
-Inspected 2026-10-29 on the January build only. The CDN still serves manifest
+Static inspection on 2026-10-29, on the January build only; `src/friends.c` now
+calls the slots below. The CDN still serves manifest
 version 1769731672 and the same `bins_win32` archive (SHA-256 matches the
 manifest); its steamclient64.dll has the pinned January fingerprint, and
 `tools/check-client-layout.py` passes on it. The September DLL is no longer
-served, so **friends support is planned for the January adapter only**; on
+served, so **friends support is for the January adapter only**; on
 September (or any other build) the friends feature reports unavailable and
 the launch proceeds as before.
 
@@ -147,6 +148,8 @@ IClientFriendsMap slots, each named by its wrapper's RIP-relative LEA:
 
 | Slot | RVA | Method |
 | ---: | --- | --- |
+| 4 | 0x768a20 | GetPersonaState (IPC 0x534bc194) |
+| 5 | 0x848460 | SetPersonaState (IPC 0xe333cf87); pinned, not called |
 | 7 | 0x752d60 | GetFriendCount |
 | 10 | 0x7526f0 | GetFriendByIndex |
 | 12 | 0x754910 | GetFriendRelationship |
@@ -154,6 +157,7 @@ IClientFriendsMap slots, each named by its wrapper's RIP-relative LEA:
 | 14 | 0x753c20 | GetFriendPersonaName |
 | 23 | 0x753250 | GetFriendGamePlayed (IPC 0xe0ce182e) |
 | 25 | 0x753580 | GetFriendGameServer |
+| 32 | 0x82e020 | RequestUserInformation (IPC 0xbc9a7cbb); pinned, not called |
 | 93 | 0x754aa0 | GetFriendRichPresence |
 | 96 | 0x82b830 | RequestFriendRichPresence |
 | 194 | 0x81f0a0 | NotifyLobbyJoinRequested (IPC 0x0e74cb2a) |
@@ -177,17 +181,21 @@ arguments, then a fencepost, and checks response byte 11):
 | 194 | uint32 AppID, uint64, uint64 | bool |
 | 195 | uint32 AppID, uint64 SteamID, string connect | bool |
 
+Slot 4 is not in that review: `src/friends.c` calls it with no arguments after
+`this` and reads an int32.
+
 Slot 194's two IDs are serialized and forwarded by the server dispatcher
 (`0x798d29`) in the same order; Dock passes lobby then friend, following the
-reference and `GameLobbyJoinRequested_t`. Confirm on a live client.
+reference and `GameLobbyJoinRequested_t`. Joining a friend's lobby this way has
+worked on a device (`docs/HANDOFF.md`).
 
 Earlier entry-register notes (first instructions only): GetFriendGamePlayed takes rdx (8-byte SteamID) and r8 (out pointer);
 InviteUserToGame takes edx (4 bytes), r8 and r9; NotifyLobbyJoinRequested
-takes edx (4 bytes, AppID), r8 and r9 (lobby and friend SteamIDs). Phase 1
-must finish the ABI review for every called slot (argument widths, output
-struct sizes, response bytes) the way ml1990 did, and extend the checker.
+takes edx (4 bytes, AppID), r8 and r9 (lobby and friend SteamIDs). The wrapper
+review above replaces these notes for the slots it lists, and
+`tools/check-client-layout.py` checks the pinned slots, names and IPC IDs.
 
-Consequences for the plan:
+Consequences:
 - Joining a running game: NotifyLobbyJoinRequested / NotifyRichPresenceJoin
   Requested are the client's own path for an accepted invite (they post the
   game's GameLobbyJoinRequested / GameRichPresenceJoinRequested), so no game
@@ -196,7 +204,7 @@ Consequences for the plan:
   LaunchApp's pszUserArgs (bounded), so `+connect_lobby <id>` needs no new
   launch path. Untested live.
 - Host lifetime: the launch loop polls callbacks every 50 ms until 3 s after
-  the game exits, so the friends feed and commands can run in that loop.
+  the game exits, and the friends feed and commands run in that loop.
 
 ## Friends sign-in (January build, 2026-10-30)
 

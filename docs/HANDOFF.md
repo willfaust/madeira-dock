@@ -578,7 +578,8 @@ shared-connection receive path (see below).
 
 Madeira: the in-game Session menu has a Friends page (DockFriends.swift):
 friends sorted joinable / this game / other game / online / offline, Join for
-joinable friends, Invite for online friends, the result per row. On the iPad,
+joinable friends, Invite for online friends (later narrowed, see "Status and
+Invite rules" below), the result per row. On the iPad,
 with a friend's Steam under Sikarugir: the friend showed online, Join entered
 the friend's lobby and Invite brought the friend into this lobby.
 
@@ -601,10 +602,41 @@ newline. Accepting an invite to a lobby the friend has left put the player in
 the friend's new lobby: Dock passes the invited lobby and the friend, so the
 game or the client followed the friend.
 
+## Status and Invite rules (2026-10-30)
+
+The app now picks the status (Settings › Steam › Status) and passes it as
+`MADEIRA_DOCK_PERSONA_STATE`: 0 Offline, 1 Online, 3 Away, 7 Invisible. Offline
+turns friends off for the session. Command operation 3 changes between the other
+three during play, from the Friends page. Invite is now offered only while this
+player has a lobby or a rich presence `connect` to invite with (feed flag 16),
+and to online friends; with neither, no invite is sent (result 2).
+
+## Sign-in retries, reconnect, report size (2026-10-31)
+
+A failed `ClientChangeStatus` or subscription send is tried again every 5 s,
+five tries in all. On `SteamServersConnected_t` (101) Dock announces the status
+and subscribes again. The friends count lines in the report are written at
+growing intervals, from 15 s up to 10 min. The app reads a report of up to 1 MiB
+(it was 32 KB).
+
 ## Friends off: no polling (2026-11-05)
 
 With friends off (`MADEIRA_DOCK_PERSONA_STATE=0`, `MADEIRA_DOCK_FRIENDS=0`, or a
 client build without the pins), `sh_friends_poll` and `sh_friends_end` return
 at once, so Dock no longer opens the command file every 500 ms or answers
 `friends-cmd-result=6`. `sh_friends_init` still removes files left by an
-earlier session. Not device-tested.
+earlier session. Tested by the owner with the Offline status: it works (see
+"Friends test status"). `MADEIRA_DOCK_FRIENDS=0` and a build without the pins
+have no recorded result.
+
+## Friends test status (2026-11-05)
+
+Tested by the owner: sending an invite, joining a friend without an invite,
+receiving an invite, joining with an invite, being joined without sending an
+invite, and friends off through the Offline status. The game, the invite kind and
+the report values of these runs were not recorded here.
+
+Earlier results above: the lobby invite (`friends-invite-connect=3`) works, with
+one game. `+connect_lobby` gave the friend a Join button but the game did not
+join; a signed-in session that knows its lobby now sends the lobby invite
+instead. No recorded result for the connect-string invite (1).
