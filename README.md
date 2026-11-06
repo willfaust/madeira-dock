@@ -321,15 +321,23 @@ or Invite requests to Valve's client, so a player without Steam's overlay can
 still play with friends. It calls the client's own friends methods and sends
 messages through the client's own shared connection, all pinned per build like
 every other method (currently the January build only; other builds report
-`friends-available=0` and launch as before). `MADEIRA_DOCK_FRIENDS=0` turns it
-off.
+`friends-available=0` and launch as before).
+
+Friends are **opt-in**: they run only when the app passes a status in
+`MADEIRA_DOCK_PERSONA_STATE` (1 Online, 3 Away, 7 Invisible; see **Status**).
+Without it, or with 0 (Offline, Madeira's default), Dock reports
+`friends-available=0` and does nothing else for friends: no messages of its
+own to Steam, no feed, no commands, exactly as before Friends existed. The
+messages below are ones Dock builds itself (as desktop Steam's Friends window
+does), unlike the rest of Dock, which only calls the client's own methods; they
+touch no DRM, ticket or ownership path. `MADEIRA_DOCK_FRIENDS=0` turns friends
+off even with a status.
 
 - **Friends sign-in:** with a web-based UI, Valve's client leaves signing in
   to Friends to desktop Steam's Friends window, which this headless session
   does not run. Dock sends the two messages that window sends, through the
   client's own shared connection (`IClientSharedConnection`): 2 seconds after
-  start `ClientChangeStatus` (the status the app chose, see **Status**; without
-  a choice, the account's stored status, or Online if that is Offline), then the
+  start `ClientChangeStatus` (the status the app chose, see **Status**), then the
   `Chat.RequestFriendPersonaStates` service call, which subscribes the session
   to friends' status. A failed send is tried again every 5 seconds, five tries
   in all, and both are sent again when the client logs on again after a
@@ -344,24 +352,35 @@ off.
   `friends-signin-available=0`.
 
 - **List:** every 3 seconds, `C:\madeira-friends.bin` (magic `MFRND001`) is
-  replaced atomically. It holds at most 250 friends (online or not): SteamID, persona
+  replaced atomically, so the app treats a feed much older than that as left
+  behind by a host that did not end cleanly. Dock goes through the client's
+  list (its first 2000 entries) once, calling each method at most once per
+  friend: SteamID and status for each, the game only for a friend who appears
+  online, the rich presence `connect` only for one in this game without a
+  lobby, and the name only for the friends written. It holds at most 250
+  friends (online or not); past 250, friends who invited this player, then
+  joinable, same-game, in-game and online ones are kept before offline ones,
+  in the client's order within each. Per friend: SteamID, persona
   state, the App ID they play, flags (in game, same app, joinable, invited
   this player, can invite; a friend who appears offline, invisible included, shows no
   game, as in desktop Steam) and a name
   of at most 63 bytes of valid UTF-8 without ASCII control characters. Lobby IDs,
   server addresses and connect strings are not exported.
 - **Commands:** the app writes `C:\madeira-friends-cmd.bin` (magic
-  `MFCMD001`, exactly 21 bytes: operation, SteamID, sequence). Dock reads and
-  deletes it, checks that the SteamID is an individual account on the
+  `MFCMD001`, exactly 21 bytes: operation, SteamID, sequence 1 to 2^31-1, as
+  the report prints it signed). Dock takes it by renaming it to
+  `C:\madeira-friends-cmd.taken` (so a command written meanwhile waits for the
+  next poll instead of being deleted unread), reads and deletes that, checks
+  that the SteamID is an individual account on the
   friends list, and reports `friends-cmd-seq` and `friends-cmd-result`
   (1 done, 2 not joinable, 3 not a friend, 4 the client refused, 5 malformed).
   With friends off, Dock does not read commands. Operation 3 changes the account's status: the id field
   carries 1 Online, 3 Away or 7 Invisible (nothing else is accepted) and Dock
   sends it through the client's shared connection.
 - **Status:** the app starts the session with `MADEIRA_DOCK_PERSONA_STATE`
-  (0 Offline, 1 Online, 3 Away, 7 Invisible). Offline turns the whole feature
-  off for that session, so it cannot be changed from inside the game; the other
-  three can be changed with operation 3.
+  (0 Offline, 1 Online, 3 Away, 7 Invisible). Offline, like no value at all,
+  turns the whole feature off for that session, so it cannot be changed from
+  inside the game; the other three can be changed with operation 3.
 - **Join** asks the client to deliver the friend's lobby (or their rich
   presence `connect` value, printable ASCII, at most 255 bytes) to the running
   game through `NotifyLobbyJoinRequested` / `NotifyRichPresenceJoinRequested`,

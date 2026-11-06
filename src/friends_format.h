@@ -9,6 +9,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <wchar.h>
 
 #define SH_FRIENDS_MAX 250u
 #define SH_FRIEND_NAME_CAP 64u          /* bytes including the terminator */
@@ -28,6 +29,10 @@ enum sh_friend_flag {
 /* SET_STATE carries the new persona state in the id field: 1 Online, 3 Away or
  * 7 Invisible. Offline is chosen before launch only (it turns friends off). */
 enum sh_friend_op { SH_FRIEND_INVITE = 1, SH_FRIEND_JOIN = 2, SH_FRIEND_SET_STATE = 3 };
+
+/* The friends the feed considers (the client's list in its order, up to this
+ * many); at most SH_FRIENDS_MAX of them are written. */
+#define SH_FRIENDS_SCAN 2000u
 
 /* friends-cmd-result values in the report. */
 enum sh_friend_result {
@@ -61,6 +66,22 @@ bool sh_friend_steamid_valid(uint64_t steamid);
 /* Returns the encoded size, or 0 if out is too small or count exceeds the cap. */
 size_t sh_friends_feed_encode(uint8_t *out, size_t cap, const struct sh_friend *friends, uint32_t count);
 bool sh_friend_command_parse(const uint8_t *data, size_t size, struct sh_friend_command *command);
+
+/* A status a session may sign in to Friends with or change to: 1 Online,
+ * 3 Away, 7 Invisible. */
+bool sh_friend_status_valid(uint64_t state);
+/* MADEIRA_DOCK_PERSONA_STATE (its value and the length GetEnvironmentVariableW
+ * returned): the chosen status, or -1 when friends stay off (0 Offline,
+ * missing, or anything else). Friends are opt-in: only the app's explicit
+ * choice of 1, 3 or 7 turns them on. */
+int32_t sh_friend_status_choice(const wchar_t *value, uint32_t length);
+/* Which friends the feed keeps when the list is longer than its cap: lower
+ * first. 0 invited this player, 1 joinable, 2 in this game, 3 in another game,
+ * 4 online, 5 offline (as the app orders them). */
+unsigned sh_friend_rank(uint32_t state, uint8_t flags);
+/* Writes to keep the indices of at most max of the n ranks, lowest rank first
+ * and in list order within a rank; returns how many it wrote. */
+uint32_t sh_friends_pick(const uint8_t *ranks, uint32_t n, uint32_t *keep, uint32_t max);
 
 /* Steam server messages as desktop Steam's Friends window builds them: EMsg
  * with the protobuf bit, header length 0 (the client fills the header), body.

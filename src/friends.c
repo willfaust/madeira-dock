@@ -17,6 +17,7 @@
 static const wchar_t feed_path[] = L"C:\\madeira-friends.bin";
 static const wchar_t feed_temp[] = L"C:\\madeira-friends.tmp";
 static const wchar_t command_path[] = L"C:\\madeira-friends-cmd.bin";
+static const wchar_t command_taken[] = L"C:\\madeira-friends-cmd.taken";
 /* FriendGameInfo_t, 24 bytes (GetFriendGamePlayed reads exactly 0x18). */
 struct game_info {
     uint64_t game;
@@ -44,13 +45,23 @@ typedef bool (__thiscall *send_fn)(void *, uint32_t, const void *, uint32_t);
 #define SLOT(f, n) ((*(void ***)(f)->friends)[n])
 #define SHARED(f, n) ((*(void ***)(f)->shared)[n])
 
+/* The status the app chose (MADEIRA_DOCK_PERSONA_STATE 1 Online, 3 Away,
+ * 7 Invisible), or -1. */
+static int32_t chosen_status(void)
+{
+    wchar_t value[4] = {0};
+    DWORD n = GetEnvironmentVariableW(L"MADEIRA_DOCK_PERSONA_STATE", value, 4);
+    return sh_friend_status_choice(value, n);
+}
+
 static bool disabled(void)
 {
     wchar_t value[4] = {0};
     if (GetEnvironmentVariableW(L"MADEIRA_DOCK_FRIENDS", value, 4) == 1 && value[0] == L'0') return true;
-    /* The app's Offline choice (MADEIRA_DOCK_PERSONA_STATE=0) turns friends off
-     * entirely: no sign-in to Friends, no subscription, no list, no commands. */
-    return GetEnvironmentVariableW(L"MADEIRA_DOCK_PERSONA_STATE", value, 4) == 1 && value[0] == L'0';
+    /* Opt-in: without the app's choice of a status (Offline, the app's default,
+     * or no variable at all) friends stay off entirely: no sign-in to Friends,
+     * no subscription, no list, no commands, nothing sent to Steam. */
+    return chosen_status() < 0;
 }
 
 void sh_friends_init(struct sh_friends *f, HMODULE module, void *engine, int32_t user, int32_t pipe,
@@ -65,6 +76,7 @@ void sh_friends_init(struct sh_friends *f, HMODULE module, void *engine, int32_t
     f->started_ms = o->now_ms();
     DeleteFileW(feed_path);
     DeleteFileW(command_path);
+    DeleteFileW(command_taken);
     uintptr_t base = (uintptr_t)module;
     if (disabled() || !layout || !dock_method_is(base, engine, 13, layout->engine_friends)) {
         o->event("friends-available", 0);
@@ -108,16 +120,8 @@ void sh_friends_init(struct sh_friends *f, HMODULE module, void *engine, int32_t
     f->connection = ((allocate_fn)SHARED(f, 0))(shared);
     o->event("friends-signin-available", f->connection ? 1 : 2);
     if (!f->connection) { f->shared = NULL; return; }
-    /* The app's choice (MADEIRA_DOCK_PERSONA_STATE: 0 Offline, 1 Online, 3 Away,
-     * 7 Invisible); without one, the stored state (Online on a fresh session),
-     * where Offline becomes Online. */
-    wchar_t chosen[4] = {0};
-    DWORD n = GetEnvironmentVariableW(L"MADEIRA_DOCK_PERSONA_STATE", chosen, 4);
-    if (n == 1 && (chosen[0] == L'0' || chosen[0] == L'1' || chosen[0] == L'3' || chosen[0] == L'7')) {
-        f->announce_state = (int32_t)(chosen[0] - L'0');
-    } else {
-        f->announce_state = own > 0 ? own : 1;
-    }
+    /* The app's choice; disabled() made sure there is one. */
+    f->announce_state = chosen_status();
     f->announce_pending = true;
     o->event("friends-persona-chosen", f->announce_state);
     f->announce_ms = o->now_ms() + 2000;
@@ -167,10 +171,13 @@ static bool friend_known(struct sh_friends *f, uint64_t id)
 
 static void write_feed(struct sh_friends *f)
 {
+    static struct sh_friend seen[SH_FRIENDS_SCAN];
+    static uint8_t ranks[SH_FRIENDS_SCAN];
+    static uint32_t keep[SH_FRIENDS_MAX];
     static struct sh_friend list[SH_FRIENDS_MAX];
     static uint8_t feed[SH_FRIENDS_FEED_CAP];
     int32_t total = ((count_fn)SLOT(f, 7))(f->friends, SH_FRIEND_FLAG_IMMEDIATE);
-    uint32_t count = 0;
+    uint32_t n = 0;
     int32_t valid = 0, named = 0, playing = 0, online = 0;
     /* Like desktop Steam, Invite is offered only when this player has something
      * to join: a lobby of this app, or a rich presence "connect" the game set. */
@@ -178,40 +185,48 @@ static void write_feed(struct sh_friends *f)
     char mine_connect[SH_FRIEND_CONNECT_CAP];
     bool in_lobby = ((game_fn)SLOT(f, 23))(f->friends, f->self, &mine) && mine.lobby && game_app(&mine) == f->appid;
     in_lobby = in_lobby || friend_connect(f, f->self, mine_connect);
-    for (int32_t i = 0; i < total && i < 2000 && count < SH_FRIENDS_MAX; ++i) {
+    /* One pass over the client's list, each call at most once per friend:
+     * SteamID and status for every friend; the game only for a friend who
+     * appears online (one who appears offline, invisible included, shows no
+     * game, as in desktop Steam); "connect" only for one in this game without
+     * a lobby. The counts come from the same calls. Names are asked below, for
+     * the listed friends only. */
+    for (int32_t i = 0; i < total && i < (int32_t)SH_FRIENDS_SCAN; ++i) {
         uint64_t id = 0;
         ((by_index_fn)SLOT(f, 10))(f->friends, &id, i, SH_FRIEND_FLAG_IMMEDIATE);
-        if (sh_friend_steamid_valid(id)) {
-            ++valid;
-            const char *name = ((name_fn)SLOT(f, 14))(f->friends, id);
-            struct game_info probe = {0};
-            if (name && name[0]) ++named;
-            if (((game_fn)SLOT(f, 23))(f->friends, id, &probe) && probe.game) ++playing;
-        }
-        int32_t state = sh_friend_steamid_valid(id) ? ((state_fn)SLOT(f, 13))(f->friends, id) : 0;
-        /* All friends are listed, online or not. */
         if (!sh_friend_steamid_valid(id)) continue;
+        ++valid;
+        int32_t state = ((state_fn)SLOT(f, 13))(f->friends, id);
         if (state < 0) state = 0;
-        if (state > 0) ++online;
-        struct sh_friend *entry = &list[count++];
+        struct sh_friend *entry = &seen[n];
         memset(entry, 0, sizeof *entry);
         entry->steamid = id;
         entry->state = (uint32_t)state;
-        sh_friend_name_copy(entry->name, sizeof entry->name, ((name_fn)SLOT(f, 14))(f->friends, id));
         if (invited_lobby(f, id)) entry->flags |= SH_FRIEND_INVITED;
         if (in_lobby) entry->flags |= SH_FRIEND_CAN_INVITE;
-        /* A friend who appears offline (invisible included) shows no game,
-         * as in desktop Steam, though the client may still know one. */
         struct game_info game = {0};
-        if (state > 0 && ((game_fn)SLOT(f, 23))(f->friends, id, &game) && game.game) {
-            entry->flags |= SH_FRIEND_IN_GAME;
-            entry->appid = game_app(&game);
-            if (entry->appid && entry->appid == f->appid) {
-                char connect[SH_FRIEND_CONNECT_CAP];
-                entry->flags |= SH_FRIEND_SAME_APP;
-                if (game.lobby || friend_connect(f, id, connect)) entry->flags |= SH_FRIEND_JOINABLE;
+        if (state > 0) {
+            ++online;
+            if (((game_fn)SLOT(f, 23))(f->friends, id, &game) && game.game) {
+                ++playing;
+                entry->flags |= SH_FRIEND_IN_GAME;
+                entry->appid = game_app(&game);
+                if (entry->appid && entry->appid == f->appid) {
+                    char connect[SH_FRIEND_CONNECT_CAP];
+                    entry->flags |= SH_FRIEND_SAME_APP;
+                    if (game.lobby || friend_connect(f, id, connect)) entry->flags |= SH_FRIEND_JOINABLE;
+                }
             }
         }
+        ranks[n++] = (uint8_t)sh_friend_rank(entry->state, entry->flags);
+    }
+    /* Past the cap, invited, joinable, same-game, in-game and online friends
+     * are kept before offline ones; within each, the client's order. */
+    uint32_t count = sh_friends_pick(ranks, n, keep, SH_FRIENDS_MAX);
+    for (uint32_t k = 0; k < count; ++k) {
+        list[k] = seen[keep[k]];
+        sh_friend_name_copy(list[k].name, sizeof list[k].name, ((name_fn)SLOT(f, 14))(f->friends, list[k].steamid));
+        if (list[k].name[0]) ++named;
     }
     /* As the Friends window does: ask for persona data only for friends whose
      * name has not loaded, at most once a minute. Asking for loaded friends
@@ -221,13 +236,13 @@ static void write_feed(struct sh_friends *f)
     if (f->shared && !f->announce_pending && valid && now >= f->next_request_ms) {
         static uint64_t ids[SH_FRIENDS_MAX];
         static uint8_t message[8 + 14 + SH_FRIENDS_MAX * 9];
-        uint32_t n = 0;
-        for (uint32_t i = 0; i < count; ++i) if (!list[i].name[0]) ids[n++] = list[i].steamid;
+        uint32_t unnamed = 0;
+        for (uint32_t i = 0; i < count; ++i) if (!list[i].name[0]) ids[unnamed++] = list[i].steamid;
         f->next_request_ms = now + 60000;
-        if (n) {
-            size_t size = sh_cm_request_friend_data(message, sizeof message, SH_CM_FRIEND_DATA_FLAGS, ids, n);
+        if (unnamed) {
+            size_t size = sh_cm_request_friend_data(message, sizeof message, SH_CM_FRIEND_DATA_FLAGS, ids, unnamed);
             bool sent = size && ((send_fn)SHARED(f, 2))(f->shared, f->connection, message, (uint32_t)size);
-            int32_t requested = sent ? (int32_t)n : -1;
+            int32_t requested = sent ? (int32_t)unnamed : -1;
             if (requested != f->logged_requested) f->o->event("friends-requested", requested);
             f->logged_requested = requested;
         }
@@ -332,13 +347,17 @@ static int32_t run_command(struct sh_friends *f, const struct sh_friend_command 
 
 static void read_command(struct sh_friends *f, bool game_running)
 {
-    HANDLE file = CreateFileW(command_path, GENERIC_READ, 0, NULL, OPEN_EXISTING, 0, NULL);
-    if (file == INVALID_HANDLE_VALUE) return;
+    /* The command is taken by renaming it first: one the app writes after
+     * this lands at command_path again and is read at the next poll, rather
+     * than deleted unread with this one. Without a command (the usual case)
+     * the rename fails and nothing else happens. */
+    if (!MoveFileExW(command_path, command_taken, MOVEFILE_REPLACE_EXISTING)) return;
+    HANDLE file = CreateFileW(command_taken, GENERIC_READ, 0, NULL, OPEN_EXISTING, 0, NULL);
     uint8_t data[SH_FRIENDS_COMMAND_SIZE + 1];
     DWORD size = 0;
-    bool read = ReadFile(file, data, sizeof data, &size, NULL);
-    CloseHandle(file);
-    DeleteFileW(command_path);
+    bool read = file != INVALID_HANDLE_VALUE && ReadFile(file, data, sizeof data, &size, NULL);
+    if (file != INVALID_HANDLE_VALUE) CloseHandle(file);
+    DeleteFileW(command_taken);
     struct sh_friend_command command;
     int32_t result = SH_FRIEND_BAD_COMMAND;
     if (read && sh_friend_command_parse(data, size, &command)) {
@@ -445,6 +464,7 @@ void sh_friends_end(struct sh_friends *f)
     DeleteFileW(feed_path);
     DeleteFileW(feed_temp);
     DeleteFileW(command_path);
+    DeleteFileW(command_taken);
 }
 #else
 void sh_friends_init(struct sh_friends *f, HMODULE module, void *engine, int32_t user, int32_t pipe,

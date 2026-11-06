@@ -88,7 +88,7 @@ bool sh_friend_command_parse(const uint8_t *data, size_t size, struct sh_friend_
     for (int i = 3; i >= 0; --i) sequence = (sequence << 8) | data[17 + i];
     if (!sequence) return false;
     if (op == SH_FRIEND_SET_STATE) {
-        if (id != 1 && id != 3 && id != 7) return false;
+        if (!sh_friend_status_valid(id)) return false;
     } else if ((op != SH_FRIEND_INVITE && op != SH_FRIEND_JOIN) || !sh_friend_steamid_valid(id)) {
         return false;
     }
@@ -96,6 +96,37 @@ bool sh_friend_command_parse(const uint8_t *data, size_t size, struct sh_friend_
     command->steamid = id;
     command->sequence = sequence;
     return true;
+}
+
+bool sh_friend_status_valid(uint64_t state)
+{
+    return state == 1 || state == 3 || state == 7;
+}
+
+int32_t sh_friend_status_choice(const wchar_t *value, uint32_t length)
+{
+    if (!value || length != 1 || value[0] < L'0' || value[0] > L'9') return -1;
+    uint32_t state = (uint32_t)(value[0] - L'0');
+    return sh_friend_status_valid(state) ? (int32_t)state : -1;
+}
+
+unsigned sh_friend_rank(uint32_t state, uint8_t flags)
+{
+    if (flags & SH_FRIEND_INVITED) return 0;
+    if (flags & SH_FRIEND_JOINABLE) return 1;
+    if (flags & SH_FRIEND_SAME_APP) return 2;
+    if (flags & SH_FRIEND_IN_GAME) return 3;
+    return state ? 4 : 5;
+}
+
+uint32_t sh_friends_pick(const uint8_t *ranks, uint32_t n, uint32_t *keep, uint32_t max)
+{
+    if (!ranks || !keep) return 0;
+    uint32_t count = 0;
+    for (unsigned rank = 0; rank <= 5 && count < max; ++rank)
+        for (uint32_t i = 0; i < n && count < max; ++i)
+            if ((ranks[i] > 5 ? 5u : ranks[i]) == rank) keep[count++] = i;
+    return count;
 }
 
 static size_t varint(uint8_t *out, uint32_t v)

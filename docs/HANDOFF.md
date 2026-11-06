@@ -640,3 +640,34 @@ Earlier results above: the lobby invite (`friends-invite-connect=3`) works, with
 one game. `+connect_lobby` gave the friend a Join button but the game did not
 join; a signed-in session that knows its lobby now sends the lobby invite
 instead. No recorded result for the connect-string invite (1).
+
+## Review fixes (2026-11-06)
+
+From the review of PR #10 and Madeira PR #572:
+
+- **Opt-in.** Friends run only with an explicit `MADEIRA_DOCK_PERSONA_STATE`
+  of 1, 3 or 7 (`sh_friend_status_choice`). Without the variable, or with 0,
+  Dock reports `friends-available=0` and sends Steam nothing of its own, the
+  same as before Friends. The old fallback to the account's stored status (or
+  Online) is gone, so a Madeira build that does not pass a status, or a user
+  who never chose one, never signs in to Friends. Madeira's Settings › Steam ›
+  Status is Offline by default.
+- **One call per friend per kind.** `write_feed` had a separate counting pass
+  that asked each friend's name twice and game up to twice; it is now one pass
+  (SteamID and status for everyone, the game only for friends shown online,
+  `connect` only for same-game friends without a lobby, names only for the
+  friends written). `friends-playing` now counts friends shown online who
+  play a game, and `friends-named` the written friends that have a name.
+- **Cap order.** Past 250, invited, joinable, same-game, in-game and online
+  friends are kept before offline ones (`sh_friend_rank`, `sh_friends_pick`),
+  out of the client's first 2000 entries.
+- **Commands are taken by rename** (`C:\madeira-friends-cmd.taken`), so a
+  command written between reading and deleting is no longer lost.
+- The app side (Madeira) masks its sequence to 31 bits, matches only report
+  lines written after its command, ignores a feed older than 15 s and removes
+  the feed and command files at session end.
+
+Checked on the host: `tools/check.sh` (all five suites, ASan and UBSan,
+including the new status and cap cases) and both cross-builds with `-Werror`.
+Not yet checked on a device or with live Steam: these changes have not been
+through a Friends session; `tools/check-client-layout.py` needs the Valve DLL.

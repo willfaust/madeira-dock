@@ -117,5 +117,35 @@ int main(void)
     static const uint8_t call[] = {0x97, 0, 0, 0x80, 35, 0, 0, 0, 0x62, 33, 'C', 'h', 'a', 't', '.'};
     assert(size == 10 + 33 && !memcmp(msg, call, sizeof call) && msg[size - 1] == '1');
     assert(!sh_cm_service_call(msg, 20, "Chat.RequestFriendPersonaStates#1") && !sh_cm_service_call(msg, sizeof msg, ""));
-    puts("PASS: friends feed bounds, name/connect sanitizing, SteamID and command validation, Friends sign-in messages");
+
+    /* Opt-in: only the app's explicit 1, 3 or 7 turns friends on. */
+    assert(sh_friend_status_choice(L"1", 1) == 1 && sh_friend_status_choice(L"3", 1) == 3 && sh_friend_status_choice(L"7", 1) == 7);
+    assert(sh_friend_status_choice(L"0", 1) == -1);                      /* Offline */
+    assert(sh_friend_status_choice(L"", 0) == -1);                       /* missing */
+    assert(sh_friend_status_choice(NULL, 1) == -1);
+    assert(sh_friend_status_choice(L"2", 1) == -1 && sh_friend_status_choice(L"x", 1) == -1);
+    assert(sh_friend_status_choice(L"17", 2) == -1 && sh_friend_status_choice(L"1", 4) == -1);   /* too long */
+    assert(sh_friend_status_valid(1) && sh_friend_status_valid(3) && sh_friend_status_valid(7));
+    assert(!sh_friend_status_valid(0) && !sh_friend_status_valid(2) && !sh_friend_status_valid(0x100000001ULL));
+
+    /* The feed cap keeps invited, joinable, same-game, in-game and online friends first. */
+    assert(sh_friend_rank(0, SH_FRIEND_INVITED | SH_FRIEND_CAN_INVITE) == 0);
+    assert(sh_friend_rank(1, SH_FRIEND_IN_GAME | SH_FRIEND_SAME_APP | SH_FRIEND_JOINABLE) == 1);
+    assert(sh_friend_rank(1, SH_FRIEND_IN_GAME | SH_FRIEND_SAME_APP) == 2);
+    assert(sh_friend_rank(1, SH_FRIEND_IN_GAME) == 3);
+    assert(sh_friend_rank(3, SH_FRIEND_CAN_INVITE) == 4);
+    assert(sh_friend_rank(0, SH_FRIEND_CAN_INVITE) == 5);
+    static uint8_t ranks[SH_FRIENDS_SCAN];
+    static uint32_t keep[SH_FRIENDS_MAX];
+    for (unsigned i = 0; i < SH_FRIENDS_SCAN; ++i) ranks[i] = 5;          /* 2000 offline friends ... */
+    ranks[1999] = 1; ranks[1500] = 4; ranks[300] = 0; ranks[1000] = 4; ranks[7] = 9;   /* ... a few online past 250 */
+    uint32_t kept = sh_friends_pick(ranks, SH_FRIENDS_SCAN, keep, SH_FRIENDS_MAX);
+    assert(kept == SH_FRIENDS_MAX);
+    assert(keep[0] == 300 && keep[1] == 1999 && keep[2] == 1000 && keep[3] == 1500);
+    assert(keep[4] == 0 && keep[5] == 1 && keep[11] == 7 && keep[SH_FRIENDS_MAX - 1] == SH_FRIENDS_MAX - 5);
+    for (uint32_t i = 0; i < kept; ++i) for (uint32_t j = i + 1; j < kept; ++j) assert(keep[i] != keep[j]);
+    assert(sh_friends_pick(ranks, 3, keep, SH_FRIENDS_MAX) == 3 && keep[0] == 0 && keep[2] == 2);
+    assert(sh_friends_pick(ranks, SH_FRIENDS_SCAN, keep, 2) == 2 && keep[0] == 300 && keep[1] == 1999);
+    assert(!sh_friends_pick(ranks, 0, keep, SH_FRIENDS_MAX) && !sh_friends_pick(NULL, 3, keep, 3) && !sh_friends_pick(ranks, 3, NULL, 3));
+    puts("PASS: friends feed bounds, name/connect sanitizing, SteamID and command validation, Friends sign-in messages, opt-in status, feed priority past the cap");
 }
