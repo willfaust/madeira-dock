@@ -508,3 +508,166 @@ start after 500 ms by default; MADEIRA_DOCK_LICENCE_WAIT_MS accepts 0..30000.
 The existing strict integer parser rejects signs, spaces and overflow. Positive
 ownership from Valve remains required. Native sanitizer checks pass; this
 combined change has not been tested with a live client or a device.
+
+## Friends, invites and join (2026-10-29)
+
+New optional `src/friends.c` (Windows) and `src/friends_format.c` (portable,
+tested in `tests/test-friends_format.c`). After LaunchApp is submitted the host
+gets IClientFriends through CSteamClient slot 13, checks nine pinned friends
+slots, and in the launch loop writes `C:\madeira-friends.bin` every 3 s and
+reads `C:\madeira-friends-cmd.bin` every 0.5 s. Feed and commands are
+deleted at host start and exit. September layout has zero friends pins:
+`friends-available=0`, launch unchanged. `tools/check-client-layout.py` now
+also checks the friends slots, names and IPC IDs (passes on the January DLL
+from Valve's CDN). Cross-compile (x86-64, i686) and native ASan/UBSan tests
+pass.
+
+Not yet proven at runtime: friend list contents, GetFriendByIndex hidden
+return, the lobby/friend argument order of NotifyLobbyJoinRequested (taken
+from the reference and the public callback; the server passes both through
+in order), and whether games react to the join notifications. Invites carry
+an empty connect string. Not done: the app side (Madeira reads nothing yet),
+join at launch (`MADEIRA_STEAM_HOST_ARGUMENTS` with `+connect_lobby`),
+incoming invites. Needs a live client and a second account to verify.
+
+## Friends sign-in, lobby invites (2026-10-30)
+
+Device test (iPad, January client, second account) found the headless
+session offline to friends, every friend offline, and no record of its own
+game or lobby, so invites had no Join button. Cause: `SetPersonaStateInternal`
+(`0x9e61d0`) checks `0x68f550` (web-UI mode) and then only posts
+`SetPersonaStateInternal_t` (`0xfde9b`) for desktop Steam's Friends window;
+the window signs in. The Friends window's script (`steamui_websrc_all`,
+`chunk~2dcc5aaf7.js`) sends on logon `ClientChangeStatus` (EMsg 716:
+persona_state, persona_set_by_user false, need_persona_response true,
+is_client_idle false) and `ClientRequestFriendData` (EMsg 815, flags 1106,
+friend IDs), through `SteamClient.SharedConnection.SendMsg`, which SteamUI
+maps to IClientSharedConnection. Dock now does the same (CSteamClient slot 69,
+IClientSharedConnectionMap slots 0/2; see CLIENT_LAYOUTS.md). The earlier
+Offline/Online toggle and per-friend RequestUserInformation calls are gone;
+those pins remain but are not called.
+
+Result on the iPad: `friends-signin=1`, `friends-requested=12`,
+`friends-online` 1, `friends-own-game=4`. The friend saw the account Online
+and In-Game. Invites with `+connect_lobby` (InviteUserToGame) showed a Join
+button but the game did not join; the friends menu's "Invite to lobby"
+(EMsg 6621 `ClientMMSInviteToLobby`: header routing_appid, steam_id_lobby,
+steam_id_user_invited), now sent whenever the own lobby is known
+(`friends-invite-connect=3`), joined the friend into the lobby.
+
+Not yet tested: Join from Madeira into a friend's lobby, incoming invites
+(the session now receives friends' data; callback IDs are still logged), and
+the Madeira Friends sheet. The app's Web API presence code (it got a
+refresh token revoked) has since been removed.
+
+## Friends' status subscription, Friends page (2026-10-30, later)
+
+Friends' status stopped arriving although Steam showed the friend online
+elsewhere. `PersonaStateChange_t` flags showed friends' updates carrying only
+name, relationship and name-first-set bits. The Friends window, once the
+friends list is in, calls `Chat.RequestFriendPersonaStates#1` (EMsg 151,
+header target_job_name, empty body); Dock now sends it after
+ClientChangeStatus (`friends-subscribed`). Status then arrived, but Dock's
+once-a-minute ClientRequestFriendData for every friend reset all friends to
+offline (the update carried the went-offline bit). The window sends that
+request only for friends whose name is not loaded; Dock now does the same
+(normally none). The earlier "online" sightings were status changes that
+happened to arrive. Callback 503 (LobbyInvite_t) arrives on Dock's pipe once
+the session is signed in to Friends, so incoming lobby invites need no
+shared-connection receive path (see below).
+
+Madeira: the in-game Session menu has a Friends page (DockFriends.swift):
+friends sorted joinable / this game / other game / online / offline, Join for
+joinable friends, Invite for online friends (later narrowed, see "Status and
+Invite rules" below), the result per row. On the iPad,
+with a friend's Steam under Sikarugir: the friend showed online, Join entered
+the friend's lobby and Invite brought the friend into this lobby.
+
+## Incoming invites (2026-10-30)
+
+Dock keeps each LobbyInvite_t (503: inviter, lobby, CGameID) for the session's
+App ID, newest per friend, at most 16, and sets feed flag 8 (invited) on the
+inviter; Join on that friend calls NotifyLobbyJoinRequested with the invited
+lobby and forgets the invite. The Friends page lists inviters first with
+"Invited you to play" and Accept. On the iPad the friend's invite appeared and
+Accept joined the friend's lobby. Invites from game invites with a connect
+string (GameRichPresenceJoinRequested, chat messages) are not handled.
+
+Follow-up: an invisible friend who invited showed as in game (the client
+still knows the game); the feed now sets game flags only for friends shown
+online, and Join without an invite refuses friends shown offline. The app's
+Join result reads "Sent to the game" (the game decides whether it gets in)
+and results clear after 5 s. Dock's report uses CRLF; the app splits on any
+newline. Accepting an invite to a lobby the friend has left put the player in
+the friend's new lobby: Dock passes the invited lobby and the friend, so the
+game or the client followed the friend.
+
+## Status and Invite rules (2026-10-30)
+
+The app now picks the status (Settings › Steam › Status) and passes it as
+`MADEIRA_DOCK_PERSONA_STATE`: 0 Offline, 1 Online, 3 Away, 7 Invisible. Offline
+turns friends off for the session. Command operation 3 changes between the other
+three during play, from the Friends page. Invite is now offered only while this
+player has a lobby or a rich presence `connect` to invite with (feed flag 16),
+and to online friends; with neither, no invite is sent (result 2).
+
+## Sign-in retries, reconnect, report size (2026-10-31)
+
+A failed `ClientChangeStatus` or subscription send is tried again every 5 s,
+five tries in all. On `SteamServersConnected_t` (101) Dock announces the status
+and subscribes again. The friends count lines in the report are written at
+growing intervals, from 15 s up to 10 min. The app reads a report of up to 1 MiB
+(it was 32 KB).
+
+## Friends off: no polling (2026-11-05)
+
+With friends off (`MADEIRA_DOCK_PERSONA_STATE=0`, `MADEIRA_DOCK_FRIENDS=0`, or a
+client build without the pins), `sh_friends_poll` and `sh_friends_end` return
+at once, so Dock no longer opens the command file every 500 ms or answers
+`friends-cmd-result=6`. `sh_friends_init` still removes files left by an
+earlier session. Tested by the owner with the Offline status: it works (see
+"Friends test status"). `MADEIRA_DOCK_FRIENDS=0` and a build without the pins
+have no recorded result.
+
+## Friends test status (2026-11-05)
+
+Tested by the owner: sending an invite, joining a friend without an invite,
+receiving an invite, joining with an invite, being joined without sending an
+invite, and friends off through the Offline status. The game, the invite kind and
+the report values of these runs were not recorded here.
+
+Earlier results above: the lobby invite (`friends-invite-connect=3`) works, with
+one game. `+connect_lobby` gave the friend a Join button but the game did not
+join; a signed-in session that knows its lobby now sends the lobby invite
+instead. No recorded result for the connect-string invite (1).
+
+## Review fixes (2026-11-06)
+
+From the review of PR #10 and Madeira PR #572:
+
+- **Opt-in.** Friends run only with an explicit `MADEIRA_DOCK_PERSONA_STATE`
+  of 1, 3 or 7 (`sh_friend_status_choice`). Without the variable, or with 0,
+  Dock reports `friends-available=0` and sends Steam nothing of its own, the
+  same as before Friends. The old fallback to the account's stored status (or
+  Online) is gone, so a Madeira build that does not pass a status, or a user
+  who never chose one, never signs in to Friends. Madeira's Settings › Steam ›
+  Status is Offline by default.
+- **One call per friend per kind.** `write_feed` had a separate counting pass
+  that asked each friend's name twice and game up to twice; it is now one pass
+  (SteamID and status for everyone, the game only for friends shown online,
+  `connect` only for same-game friends without a lobby, names only for the
+  friends written). `friends-playing` now counts friends shown online who
+  play a game, and `friends-named` the written friends that have a name.
+- **Cap order.** Past 250, invited, joinable, same-game, in-game and online
+  friends are kept before offline ones (`sh_friend_rank`, `sh_friends_pick`),
+  out of the client's first 2000 entries.
+- **Commands are taken by rename** (`C:\madeira-friends-cmd.taken`), so a
+  command written between reading and deleting is no longer lost.
+- The app side (Madeira) masks its sequence to 31 bits, matches only report
+  lines written after its command, ignores a feed older than 15 s and removes
+  the feed and command files at session end.
+
+Checked on the host: `tools/check.sh` (all five suites, ASan and UBSan,
+including the new status and cap cases) and both cross-builds with `-Werror`.
+Not yet checked on a device or with live Steam: these changes have not been
+through a Friends session; `tools/check-client-layout.py` needs the Valve DLL.

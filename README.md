@@ -246,7 +246,8 @@ Switches that turn a behaviour off (all default on): `MADEIRA_DOCK_CEG=0`,
 `MADEIRA_DOCK_CEG_SCM=0`, `MADEIRA_DOCK_CEG_SERVICE_INSTALL=0`, `MADEIRA_DOCK_CONTENT_WAIT=0`,
 `MADEIRA_DOCK_CONFIG_WAIT=0`, `MADEIRA_DOCK_SESSION_WAIT=0`, `MADEIRA_DOCK_LIST_ENTITLEMENT=0`,
 `MADEIRA_DOCK_CLIENT_202601=0`, `MADEIRA_DOCK_HANDOFF_DIAGNOSTICS=0`,
-`MADEIRA_DOCK_INSTALL_SCM=0`, `MADEIRA_DOCK_OFFLINE_LOGON=0` (no offline start, and no
+`MADEIRA_DOCK_INSTALL_SCM=0`, `MADEIRA_DOCK_FRIENDS=0`, `MADEIRA_DOCK_FRIENDS_ONLINE=0` (see
+"Friends"), `MADEIRA_DOCK_OFFLINE_LOGON=0` (no offline start, and no
 `session-offline-*` question), `MADEIRA_DOCK_KEEP_ALIVE=0` (no hold after the running report
 ends; a `;`-separated list of image names instead adds those programs to the game's tree). The
 three waits only ask Valve's client again for a bounded time when it answers "content is still
@@ -313,6 +314,97 @@ python3 tools/check-privacy.py [--history|--self-test]
 Never commit tokens, passwords, Steam login caches, account names, real SteamIDs, personal paths,
 logs, Valve binaries, games or build output.
 
+## Friends
+
+While a launched game runs, Dock can list the account's friends and pass Join
+or Invite requests to Valve's client, so a player without Steam's overlay can
+still play with friends. It calls the client's own friends methods and sends
+messages through the client's own shared connection, all pinned per build like
+every other method (currently the January build only; other builds report
+`friends-available=0` and launch as before).
+
+Friends are **opt-in**: they run only when the app passes a status in
+`MADEIRA_DOCK_PERSONA_STATE` (1 Online, 3 Away, 7 Invisible; see **Status**).
+Without it, or with 0 (Offline, Madeira's default), Dock reports
+`friends-available=0` and does nothing else for friends: no messages of its
+own to Steam, no feed, no commands, exactly as before Friends existed. The
+messages below are ones Dock builds itself (as desktop Steam's Friends window
+does), unlike the rest of Dock, which only calls the client's own methods; they
+touch no DRM, ticket or ownership path. `MADEIRA_DOCK_FRIENDS=0` turns friends
+off even with a status.
+
+- **Friends sign-in:** with a web-based UI, Valve's client leaves signing in
+  to Friends to desktop Steam's Friends window, which this headless session
+  does not run. Dock sends the two messages that window sends, through the
+  client's own shared connection (`IClientSharedConnection`): 2 seconds after
+  start `ClientChangeStatus` (the status the app chose, see **Status**), then the
+  `Chat.RequestFriendPersonaStates` service call, which subscribes the session
+  to friends' status. A failed send is tried again every 5 seconds, five tries
+  in all, and both are sent again when the client logs on again after a
+  dropped connection. `ClientRequestFriendData` goes only for friends whose name
+  has not loaded (at most once a minute): asking it for loaded friends resets
+  their status to offline. Friends then see the account with that status, and
+  the session receives friends' status and its own lobby. Reported as
+  `friends-signin-available`, `friends-signin`, `friends-subscribed`,
+  `friends-requested`, and `friends-persona-flags` / `friends-persona-updates`
+  (the kinds and count of friends' status changes).
+  `MADEIRA_DOCK_FRIENDS_ONLINE=0` sends none of these messages and reports
+  `friends-signin-available=0`.
+
+- **List:** every 3 seconds, `C:\madeira-friends.bin` (magic `MFRND001`) is
+  replaced atomically, so the app treats a feed much older than that as left
+  behind by a host that did not end cleanly. Dock goes through the client's
+  list (its first 2000 entries) once, calling each method at most once per
+  friend: SteamID and status for each, the game only for a friend who appears
+  online, the rich presence `connect` only for one in this game without a
+  lobby, and the name only for the friends written. It holds at most 250
+  friends (online or not); past 250, friends who invited this player, then
+  joinable, same-game, in-game and online ones are kept before offline ones,
+  in the client's order within each. Per friend: SteamID, persona
+  state, the App ID they play, flags (in game, same app, joinable, invited
+  this player, can invite; a friend who appears offline, invisible included, shows no
+  game, as in desktop Steam) and a name
+  of at most 63 bytes of valid UTF-8 without ASCII control characters. Lobby IDs,
+  server addresses and connect strings are not exported.
+- **Commands:** the app writes `C:\madeira-friends-cmd.bin` (magic
+  `MFCMD001`, exactly 21 bytes: operation, SteamID, sequence 1 to 2^31-1, as
+  the report prints it signed). Dock takes it by renaming it to
+  `C:\madeira-friends-cmd.taken` (so a command written meanwhile waits for the
+  next poll instead of being deleted unread), reads and deletes that, checks
+  that the SteamID is an individual account on the
+  friends list, and reports `friends-cmd-seq` and `friends-cmd-result`
+  (1 done, 2 not joinable, 3 not a friend, 4 the client refused, 5 malformed).
+  With friends off, Dock does not read commands. Operation 3 changes the account's status: the id field
+  carries 1 Online, 3 Away or 7 Invisible (nothing else is accepted) and Dock
+  sends it through the client's shared connection.
+- **Status:** the app starts the session with `MADEIRA_DOCK_PERSONA_STATE`
+  (0 Offline, 1 Online, 3 Away, 7 Invisible). Offline, like no value at all,
+  turns the whole feature off for that session, so it cannot be changed from
+  inside the game; the other three can be changed with operation 3.
+- **Join** asks the client to deliver the friend's lobby (or their rich
+  presence `connect` value, printable ASCII, at most 255 bytes) to the running
+  game through `NotifyLobbyJoinRequested` / `NotifyRichPresenceJoinRequested`,
+  the client's own path for an accepted invite. The game decides
+  whether to join. **Invite** works while the game runs and the account has something to
+  join, as in desktop Steam. In a lobby of this game, Dock sends the lobby
+  invite that the friends menu's "Invite to lobby" sends
+  (`ClientMMSInviteToLobby`, through the shared connection); the friend's game
+  joins through its lobby join callback. Otherwise it calls `InviteUserToGame`
+  with the game's rich presence `connect`, else `+connect_lobby <lobby>`. With
+  neither, no invite is sent (result 2). The feed sets the can-invite flag on
+  every friend while one of these exists, so the app shows Invite only then.
+  `friends-invite-connect` reports which (3 lobby invite, 1 connect, 2
+  connect_lobby, 0 none) and `friends-own-game` what the client knows of the
+  account's own game (0 nothing ... 4 this app with a lobby). How to test each
+  kind: [docs/INVITE_TESTING.md](docs/INVITE_TESTING.md).
+- **Incoming invites:** a lobby invite from a friend (`LobbyInvite_t`) for
+  this game is kept (the newest per friend, at most 16) and flags that friend
+  as having invited this player; Join on that friend joins the invited lobby.
+  Reported as `friends-invite-received` (1 kept, 0 not kept: another game's, or
+  without a valid sender or lobby).
+- SteamIDs and names go only to the feed file; the report and logs carry
+  counts and result codes.
+
 ## Repository layout
 
 | Path | Contents |
@@ -322,6 +414,7 @@ logs, Valve binaries, games or build output.
 | `src/launch.c` | Install-folder check, CEG request, discovery values, `LaunchApp`, the game-running loop. |
 | `src/auth.c` | The one-use sign-in transfer: parse, consume, clear. |
 | `src/client_layout.c` | The supported client builds and their method addresses. |
+| `src/friends.c`, `src/friends_format.c` | Friends list feed and Join/Invite commands; the bounded file formats. |
 | `src/scm.c` | Wine's service manager and Valve's service installer. |
 | `src/probe.c`, `src/validation.c` | The bootstrap test and the pure decision functions the tests cover. |
 | `tests/`, `tools/` | Unit tests; build, check, privacy and layout scripts. |

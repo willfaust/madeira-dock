@@ -13,7 +13,7 @@ fi
 [[ -n "$compiler" ]] || { echo "No clang found; set HOST_CC to a clang with ASan/UBSan" >&2; exit 1; }
 output=.build/tests
 mkdir -p "$output"
-for test in probe validation auth client_layout; do
+for test in probe validation auth client_layout friends_format; do
     "$compiler" -std=c11 -g -O1 -Wall -Wextra -Werror -fsanitize=address,undefined \
         -Isrc "src/$test.c" "tests/test-$test.c" -o "$output/test-$test"
     "$output/test-$test"

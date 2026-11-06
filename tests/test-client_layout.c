@@ -31,9 +31,16 @@ int main(void)
     assert(dock_method_is(base, &object, 215, jan->logon_offline));
     assert(!dock_method_is(base, &object, 215, sep->logon_offline));
     assert(!dock_method_is(base, &object, 214, jan->logon_offline));
+    /* Friends: pinned for January only; September stays unpinned (feature off). */
+    assert(jan->engine_friends == 0x943510 && jan->friend_count == 0x752d60 &&
+           jan->friend_join_lobby == 0x81f0a0 && jan->friend_join_presence == 0x81f4f0);
+    assert(!sep->engine_friends && !sep->friend_count && !sep->friend_invite && !sep->friend_join_lobby);
+    vtable[13] = (void *)(base + jan->engine_friends);
+    assert(dock_method_is(base, &object, 13, jan->engine_friends));
+    assert(!dock_method_is(base, &object, 13, sep->engine_friends));
     assert(!dock_method_is(base + 1, &object, 8, jan->engine_user));
     assert(!dock_method_is(base, NULL, 8, jan->engine_user));
     object = NULL;
     assert(!dock_method_is(base, &object, 8, jan->engine_user));
-    puts("PASS: exact client selection, unknown/partial/changed hash rejection and mismatched method rejection");
+    puts("PASS: exact client selection, unknown/partial/changed hash rejection and mismatched method rejection; friends pinned for January only");
 }

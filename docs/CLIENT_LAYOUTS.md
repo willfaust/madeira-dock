@@ -125,3 +125,114 @@ signed-negative cleanup test: slots 5 and 214 take only `this` and read back a
 and reads back a 4-byte result. Neighbouring slots 216
 `ValidateOfflineLogonTicket` and 217 `BGetOfflineLogonTicket` are not called:
 Dock never handles the ticket itself.
+
+## Friends research (January build)
+
+Static inspection on 2026-10-29, on the January build only; `src/friends.c` now
+calls the slots below. The CDN still serves manifest
+version 1769731672 and the same `bins_win32` archive (SHA-256 matches the
+manifest); its steamclient64.dll has the pinned January fingerprint, and
+`tools/check-client-layout.py` passes on it. The September DLL is no longer
+served, so **friends support is for the January adapter only**; on
+September (or any other build) the friends feature reports unavailable and
+the launch proceeds as before.
+
+Accessor: CSteamClient slot **13** (`0x943510`). Its instructions are
+identical to slot 8 (GetIClientUser, pinned) except the field it returns:
+`ClientInterfaces_t+0x20` instead of `+0x18`. The constructor caller at
+`0x9ed414` stores the object built at `0x728730`, which installs vtable
+`IClientFriendsMap` (RVA `0x12bbed8`), into `+0x20`; the same caller stores
+the IClientUserMap object into `+0x18` (`0x9ed5fc`), cross-checking slot 8.
+
+IClientFriendsMap slots, each named by its wrapper's RIP-relative LEA:
+
+| Slot | RVA | Method |
+| ---: | --- | --- |
+| 4 | 0x768a20 | GetPersonaState (IPC 0x534bc194) |
+| 5 | 0x848460 | SetPersonaState (IPC 0xe333cf87); pinned, not called |
+| 7 | 0x752d60 | GetFriendCount |
+| 10 | 0x7526f0 | GetFriendByIndex |
+| 12 | 0x754910 | GetFriendRelationship |
+| 13 | 0x7542b0 | GetFriendPersonaState |
+| 14 | 0x753c20 | GetFriendPersonaName |
+| 23 | 0x753250 | GetFriendGamePlayed (IPC 0xe0ce182e) |
+| 25 | 0x753580 | GetFriendGameServer |
+| 32 | 0x82e020 | RequestUserInformation (IPC 0xbc9a7cbb); pinned, not called |
+| 93 | 0x754aa0 | GetFriendRichPresence |
+| 96 | 0x82b830 | RequestFriendRichPresence |
+| 194 | 0x81f0a0 | NotifyLobbyJoinRequested (IPC 0x0e74cb2a) |
+| 195 | 0x81f4f0 | NotifyRichPresenceJoinRequested |
+| 215 | 0x812f10 | InviteUserToGame (IPC 0x481f046d) |
+
+Not to be called: 188/190 ActivateGameOverlayInviteDialog* (overlay UI).
+
+Full wrapper review (Phase 1; each serializes the pipe, the function ID, its
+arguments, then a fencepost, and checks response byte 11):
+
+| Slot | Arguments after `this` | Returns |
+| ---: | --- | --- |
+| 7 | int32 flags | int32 |
+| 10 | hidden `uint64 *` result (rdx), int32 index, int32 flags | CSteamID through rdx |
+| 13 | uint64 SteamID | int32 |
+| 14 | uint64 SteamID | string (copied at once) |
+| 23 | uint64 SteamID, `FriendGameInfo_t *` | bool, then 24 bytes into the pointer |
+| 93 | uint32 AppID, uint64 SteamID, string key | string or NULL |
+| 215 | uint32 AppID, uint64 SteamID, string connect | bool |
+| 194 | uint32 AppID, uint64, uint64 | bool |
+| 195 | uint32 AppID, uint64 SteamID, string connect | bool |
+
+Slot 4 is not in that review: `src/friends.c` calls it with no arguments after
+`this` and reads an int32.
+
+Slot 194's two IDs are serialized and forwarded by the server dispatcher
+(`0x798d29`) in the same order; Dock passes lobby then friend, following the
+reference and `GameLobbyJoinRequested_t`. Joining a friend's lobby this way has
+worked on a device (`docs/HANDOFF.md`).
+
+Earlier entry-register notes (first instructions only): GetFriendGamePlayed takes rdx (8-byte SteamID) and r8 (out pointer);
+InviteUserToGame takes edx (4 bytes), r8 and r9; NotifyLobbyJoinRequested
+takes edx (4 bytes, AppID), r8 and r9 (lobby and friend SteamIDs). The wrapper
+review above replaces these notes for the slots it lists, and
+`tools/check-client-layout.py` checks the pinned slots, names and IPC IDs.
+
+Consequences:
+- Joining a running game: NotifyLobbyJoinRequested / NotifyRichPresenceJoin
+  Requested are the client's own path for an accepted invite (they post the
+  game's GameLobbyJoinRequested / GameRichPresenceJoinRequested), so no game
+  restart is needed for games that listen to those callbacks.
+- Joining at start: the host already passes MADEIRA_STEAM_HOST_ARGUMENTS to
+  LaunchApp's pszUserArgs (bounded), so `+connect_lobby <id>` needs no new
+  launch path. Untested live.
+- Host lifetime: the launch loop polls callbacks every 50 ms until 3 s after
+  the game exits, and the friends feed and commands run in that loop.
+
+## Friends sign-in (January build, 2026-10-30)
+
+| Where | RVA | What |
+| --- | --- | --- |
+| CSteamClient slot 69 | 0x9447d0 | GetIClientSharedConnection(user, pipe): same shape as slot 13, returns `ClientInterfaces_t+0x118`, where the bundle constructor (`0x9ed519`) stores the object built at `0x729cc0` (vtable IClientSharedConnectionMap) |
+| IClientSharedConnectionMap 0 | 0x70a0b0 | AllocateSharedConnection() -> uint32 handle (IPC 0x309e429d) |
+| IClientSharedConnectionMap 2 | 0x832cb0 | SendMessage(uint32 handle, const void *data, uint32 size) -> bool (IPC 0x8ad70af2) |
+
+Other slots, not called: 1 ReleaseSharedConnection, 3
+SendMessageAndAwaitResponse, 4 RegisterEMsgHandler, 5
+RegisterServiceMethodHandler, 6 BPopReceivedMessage, 7 InitiateConnection.
+
+A message is `uint32 EMsg | 0x80000000`, `uint32` header length, a
+CMsgProtoBufHeader (empty, or `routing_appid` field 3), then the body; the
+client fills SteamID and session as for the web UI. Field numbers come from
+the Friends window's own message definitions: CMsgClientChangeStatus 1
+persona_state, 5 persona_set_by_user, 7 need_persona_response, 8
+is_client_idle; CMsgClientRequestFriendData 1 persona_state_requested, 2
+friends (fixed64); CMsgClientMMSInviteToLobby 2 steam_id_lobby, 3
+steam_id_user_invited (fixed64). Builders: `src/friends_format.c`, byte-checked
+in `tests/test-friends_format.c`.
+
+Why it is needed: `SetPersonaStateInternal` (`0x9e61d0`) returns early in
+web-UI mode (`0x68f550` true) after posting `SetPersonaStateInternal_t`; the
+status sender `0x590850` needs logon state 4 and drops an unchanged status
+(`0x1d`). Logon setup (`0x9dab1d`) reads `PersonaStateDesired` and
+`AutoSignIntoFriends`.
+
+Service calls use EMsg 151 with header field 12 target_job_name; Dock sends
+`Chat.RequestFriendPersonaStates#1` this way (no response is read).

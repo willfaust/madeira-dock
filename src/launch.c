@@ -5,6 +5,7 @@
  * entitlement checks. The installed game, API DLLs and DRM remain unchanged.
  */
 #include "launch.h"
+#include "friends.h"
 #include "hold.h"
 #include "scm.h"
 #include "validation.h"
@@ -251,6 +252,8 @@ int sh_launch(HMODULE module, void *engine, void *client_user,
     HKEY active = NULL, machine = NULL;
     int result = 42;
     struct saved_value values[3] = {0};
+    struct sh_friends friends;
+    bool friends_started = false;
     /* ml1990: the public app sets MADEIRA_STEAM_HOST_CEG=1 only for an app
      * whose depot manifests flag CustomExecutable files, and records them in
      * the manifest's CheckGuid block. Failure never launches the game.
@@ -290,6 +293,8 @@ int sh_launch(HMODULE module, void *engine, void *client_user,
     uint64_t call = ((launch_fn)(*(void ***)manager)[2])(manager, &gameid, launch_option, 0, user_arguments);
     o->event("launch-request-submitted", call != 0);
     if (!call) { result = 43; goto done; }
+    sh_friends_init(&friends, module, engine, user, pipe, steamid, appid, layout, o);
+    friends_started = true;
     uint64_t begin = o->now_ms(), stopped_at = 0;
     bool seen_running = false, result_received = false, result_rejected = false;
     /* ml1970: a content refusal keeps Valve's client alive while it installs
@@ -343,6 +348,7 @@ int sh_launch(HMODULE module, void *engine, void *client_user,
             struct sh_callback cb = {0};
             if (!api->get_callback(pipe, &cb)) break;
             bool valid = cb.id > 0 && cb.size >= 0 && (!cb.size || cb.data);
+            if (valid && friends_started) sh_friends_callback(&friends, cb.id, cb.data, cb.size);
             if (valid && cb.id == 703 && cb.size >= 16) {
                 uint64_t finished; int32_t kind; uint32_t size;
                 memcpy(&finished, cb.data, 8);
@@ -441,6 +447,7 @@ int sh_launch(HMODULE module, void *engine, void *client_user,
                 break;
             }
         }
+        sh_friends_poll(&friends, running);
         if (retry_at && !seen_running && o->now_ms() >= retry_at) {
             retry_at = 0;
             call = ((launch_fn)(*(void ***)manager)[2])(manager, &gameid, launch_option, 0, user_arguments);
@@ -460,6 +467,7 @@ int sh_launch(HMODULE module, void *engine, void *client_user,
         o->sleep_ms(50);
     }
 done:
+    if (friends_started) sh_friends_end(&friends);
     SetConsoleCtrlHandler(on_control, FALSE);
     bool restored = true;
     /* Another Steam process may have claimed registration while this host was
